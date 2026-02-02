@@ -2,7 +2,8 @@
 
 GpuShark is a lightweight console application designed for real-time system monitoring. It provides a direct readout of essential GPU and CPU sensor data in a simple text-based interface.
 
-![alt text](image.png)
+<img width="469" height="287" alt="image" src="https://github.com/user-attachments/assets/92a2c325-cefb-4f2e-9e61-b5e9b12b539b" />
+
 
 ## Features
 
