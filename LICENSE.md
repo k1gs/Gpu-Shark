@@ -1,0 +1,21 @@
+# GPU Shark Binary License 1.0
+
+Copyright (c) 2026 k1gs. All rights reserved.
+
+Permission is granted to download and use unmodified official GPU Shark binary
+release packages. Redistribution is permitted only when the complete package,
+including this license and all third-party notices, is kept intact and no fee is
+charged specifically for GPU Shark.
+
+You may not modify, disassemble, decompile, reverse engineer, sublicense, sell,
+or create derivative works from the GPU Shark proprietary binaries, except to
+the limited extent that applicable law expressly permits despite this clause.
+No source-code rights are granted.
+
+Open-source and third-party components included with or incorporated into GPU
+Shark remain governed by their own licenses and are excluded from the proprietary
+terms above. See `THIRD_PARTY_NOTICES.md`.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND. TO THE MAXIMUM
+EXTENT PERMITTED BY LAW, THE COPYRIGHT HOLDER IS NOT LIABLE FOR ANY CLAIM,
+DAMAGES OR OTHER LIABILITY ARISING FROM USE OF THE SOFTWARE.

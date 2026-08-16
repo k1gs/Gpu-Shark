@@ -1,0 +1,36 @@
+name: Bug report
+description: Report incorrect or missing telemetry
+title: "[Bug] "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Please do not include GPU UUIDs, serial numbers, usernames or machine names.
+  - type: input
+    id: version
+    attributes:
+      label: GPU Shark version
+      placeholder: 0.1.0
+    validations:
+      required: true
+  - type: input
+    id: gpu
+    attributes:
+      label: GPU and board vendor
+      placeholder: GeForce RTX 3070, Gigabyte
+    validations:
+      required: true
+  - type: input
+    id: driver
+    attributes:
+      label: NVIDIA driver version
+      placeholder: 610.47
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+      description: Describe the visible values, workload and expected behavior.
+    validations:
+      required: true
