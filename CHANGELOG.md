@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.3
+
+- Added a validated GeForce RTX 3050 board profile.
+- Added exact HotSpot handling for the validated RTX 3050 profile.
+
 ## 0.1.2
 
 - Added a validated GeForce RTX 3060 board profile.
