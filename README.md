@@ -2,7 +2,7 @@
 
 [![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?logo=windows)](https://github.com/k1gs/Gpu-Shark/releases)
 [![Latest release](https://img.shields.io/github/v/release/k1gs/Gpu-Shark?display_name=tag)](https://github.com/k1gs/Gpu-Shark/releases/latest)
-[![Binary distribution](https://img.shields.io/badge/source-closed-lightgrey)](LICENSE.md)
+[![Binary distribution](https://img.shields.io/badge/source-closed-lightgrey)](LICENSE)
 
 GPU Shark is a compact Windows terminal monitor for GPU and CPU telemetry. It
 focuses on clear temperatures, a live HotSpot-to-Core delta and a dependency-
@@ -61,9 +61,9 @@ The application implementation and hardware research are not published. Release
 packages contain optimized native binaries with no debug symbols or research
 artifacts.
 
-GPU Shark includes open-source components under their respective licenses. See
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). The GPU Shark binaries are
-otherwise distributed under [LICENSE.md](LICENSE.md).
+GPU Shark is distributed under its dedicated [GPU Shark Binary License](LICENSE).
+Required notices for incorporated components are included inside each release
+package rather than stored in this repository.
 
 ## Feedback
 
