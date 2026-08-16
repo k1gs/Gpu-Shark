@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.2
+
+- Added a validated GeForce RTX 3060 board profile.
+- Added exact HotSpot handling for the validated RTX 3060 profile.
+
 ## 0.1.1
 
 - Added a validated GeForce RTX 2070 SUPER board profile.

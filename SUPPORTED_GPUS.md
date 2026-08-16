@@ -7,6 +7,7 @@ imply that every board variant exposes the same sensors.
 |---|---:|---:|---:|---|
 | GeForce RTX 2060 SUPER | Yes | Validated | Board-dependent | Validated board profile |
 | GeForce RTX 2070 SUPER | Yes | Validated | Validated | Validated board profile |
+| GeForce RTX 3060 | Yes | Validated | Board-dependent | Validated board profile |
 | GeForce RTX 3070 | Yes | Validated | Board-dependent | Validated board profile |
 | GeForce RTX 4060 | Yes | Validated | Board-dependent | Validated board profile |
 | GeForce RTX 5070 | Yes | Not exposed | Yes on tested board | Experimental RTX 50 support |
