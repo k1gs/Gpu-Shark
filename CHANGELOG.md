@@ -1,17 +1,14 @@
 # Changelog
 
-## Unreleased
-
-- Documented experimental GeForce RTX 5070 Ti Core and VRAM-temperature
-  support on a tested board.
-- Kept the unvalidated RTX 5070 Ti HotSpot value unavailable.
-
 ## 0.1.4
 
 - Added validated GeForce RTX 3080 and RTX 4090 board profiles.
 - Added HotSpot support for both profiles and VRAM temperature support for the
   validated RTX 3080 profile.
 - Kept the unverified RTX 4090 VRAM-temperature channel disabled.
+- Documented experimental GeForce RTX 5070 Ti Core and VRAM-temperature
+  support on a tested board.
+- Kept the unvalidated RTX 5070 Ti HotSpot value unavailable.
 
 ## 0.1.3
 
