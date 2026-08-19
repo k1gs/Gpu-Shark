@@ -4,14 +4,14 @@
 [![Latest release](https://img.shields.io/github/v/release/k1gs/Gpu-Shark?display_name=tag)](https://github.com/k1gs/Gpu-Shark/releases/latest)
 [![Binary distribution](https://img.shields.io/badge/source-closed-lightgrey)](LICENSE)
 
-GPU Shark is a compact Windows terminal monitor for GPU and CPU telemetry. It
-focuses on clear temperatures, a live HotSpot-to-Core delta and a dependency-
-free user experience: unpack the release and run it.
-
-![GPU Shark terminal interface](https://github.com/user-attachments/assets/92a2c325-cefb-4f2e-9e61-b5e9b12b539b)
+GPU Shark is a compact native Windows monitor for GPU and CPU telemetry. Its
+dark GUI focuses on clear temperatures and a live HotSpot-to-Core delta.
+Unpack the release and launch the application; Windows requests the required
+administrator elevation automatically.
 
 ## Telemetry
 
+- Detected NVIDIA GPU model
 - GPU Core temperature
 - GPU HotSpot temperature when available
 - VRAM temperature when available
@@ -25,9 +25,10 @@ from unrelated values.
 
 ## Download
 
-1. Open the [latest release](https://github.com/k1gs/Gpu-Shark/releases/latest).
-2. Download `GPU-Shark-win-x64.zip` and `SHA256SUMS.txt`.
-3. Verify the archive hash, unpack it and run `GPU-Shark.exe` as Administrator.
+1. Open the [releases page](https://github.com/k1gs/Gpu-Shark/releases).
+2. Download the newest `GPU-Shark-win-x64.zip` and `SHA256SUMS.txt`.
+3. Verify the archive hash, unpack every file into one directory and launch
+   `GPU-Shark.exe`. Accept the Windows administrator prompt.
 
 ```powershell
 (Get-FileHash .\GPU-Shark-win-x64.zip -Algorithm SHA256).Hash

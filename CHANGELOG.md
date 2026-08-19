@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.0-beta.1
+
+- Added the first native Windows GUI with a dark interface.
+- Added the detected NVIDIA GPU model to the telemetry view.
+- Added automatic Windows administrator elevation through the application
+  manifest.
+- Fixed component loading so bundled DLLs are resolved beside
+  `GPU-Shark.exe`, independent of the working directory.
+- Changed the public package to the GUI application only.
+- Marked this release as beta while the new interface is validated.
+
 ## 0.1.4
 
 - Added validated GeForce RTX 3080 and RTX 4090 board profiles.
