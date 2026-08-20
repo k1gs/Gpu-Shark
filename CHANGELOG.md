@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.2.0-beta.2
+
+- Reworked the native interface into a fixed landscape sensor dashboard with
+  clearer section separation and flicker-free updates.
+- Added a selected-sensor graph with a tighter scale and optional maximum-value
+  tracking enabled by double-clicking a sensor row.
+- Added separate fan RPM, power, voltage and performance-limit readings when
+  provided by the installed GPU.
+- Moved secondary GPU and system readings below the primary graphics-card
+  sensors and stopped displaying unavailable rows.
+- Removed the unreliable memory-clock reading while its provider semantics are
+  reviewed.
+- Added Russian interface text and an in-app language switch.
+- Added a consent-based feedback form with privacy-filtered public telemetry,
+  report IDs and explicit handling for validation, size, rate-limit and server
+  errors.
+- Added a standalone single-executable distribution and fixed stale embedded
+  runtime replacement, window repaint flicker, icon fallback and graph hit
+  testing.
+- Published the native Rust/Win32 GUI client source under the Beerware license;
+  telemetry-provider DLL implementations remain outside the public source tree.
+
 ## 0.2.0-beta.1
 
 - Added the first native Windows GUI with a dark interface.
