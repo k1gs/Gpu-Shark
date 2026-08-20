@@ -1,0 +1,531 @@
+use crate::gui_i18n::{Key, Language};
+use crate::gui_state::SensorHistory;
+use gpu_shark::{SensorReading, SysInfo};
+use windows_sys::Win32::Foundation::{RECT, SIZE};
+use windows_sys::Win32::Graphics::Gdi::{
+    CreatePen, CreateSolidBrush, DeleteObject, FillRect, GetTextExtentPoint32W, HDC, LineTo,
+    MoveToEx, PS_SOLID, SelectObject, SetTextColor, TextOutW,
+};
+
+pub const BACKGROUND: u32 = rgb(30, 30, 30);
+const SURFACE: u32 = rgb(36, 36, 36);
+const SURFACE_RAISED: u32 = rgb(48, 48, 48);
+const DIVIDER: u32 = rgb(72, 72, 72);
+const LABEL: u32 = rgb(190, 190, 190);
+const VALUE: u32 = rgb(255, 255, 255);
+const MUTED: u32 = rgb(145, 145, 145);
+const AMBER: u32 = rgb(246, 211, 45);
+const RED: u32 = rgb(237, 51, 59);
+
+const LIST_LEFT: i32 = 16;
+const LIST_TOP: i32 = 124;
+const LIST_WIDTH: i32 = 548;
+const ROW_HEIGHT: i32 = 23;
+const MAX_ROWS: usize = 14;
+
+pub const fn rgb(r: u8, g: u8, b: u8) -> u32 {
+    (r as u32) | ((g as u32) << 8) | ((b as u32) << 16)
+}
+
+pub fn accent() -> u32 {
+    // High-contrast GNOME green. Windows colorization can be too dark or
+    // desaturated for small GDI text on this surface, so the app uses a stable
+    // accessible accent instead of copying an unreadable system shade.
+    rgb(87, 227, 137)
+}
+
+pub fn ordered_sensors(info: &SysInfo) -> Vec<SensorReading> {
+    let mut sensors = info.sensors.clone();
+    sensors.retain(|sensor| !sensor.name.eq_ignore_ascii_case("Memory Clock"));
+    sensors.sort_by_key(|sensor| {
+        (
+            sensor_group(&sensor.name),
+            sensor_priority(&sensor.name),
+            sensor.name.clone(),
+        )
+    });
+    sensors
+}
+
+fn sensor_group(name: &str) -> u8 {
+    let lower = name.to_ascii_lowercase();
+    if lower.contains("core")
+        || lower.contains("hot spot")
+        || lower.contains("fan")
+        || lower.contains("power")
+        || lower.contains("voltage")
+        || lower.contains("perfcap")
+        || lower.contains("performance limit")
+        || lower.contains("gpu clock")
+        || lower.contains("memory clock")
+    {
+        0
+    } else if lower.contains("cpu") || lower.contains("system") {
+        2
+    } else {
+        1
+    }
+}
+
+fn sensor_priority(name: &str) -> u8 {
+    let lower = name.to_ascii_lowercase();
+    if lower.contains("gpu core") {
+        0
+    } else if lower.contains("hot spot") {
+        1
+    } else if lower.contains("memory temperature") {
+        2
+    } else if lower.contains("fan") {
+        3
+    } else if lower.contains("gpu clock") {
+        4
+    } else if lower.contains("memory clock") {
+        5
+    } else if lower.contains("power") {
+        6
+    } else if lower.contains("voltage") {
+        7
+    } else if lower.contains("perfcap") || lower.contains("performance limit") {
+        8
+    } else {
+        9
+    }
+}
+
+fn group_title(group: u8, language: Language) -> &'static str {
+    match group {
+        0 => "GPU",
+        1 => language.text(Key::GpuActivity),
+        _ => language.text(Key::System),
+    }
+}
+
+fn wstr(text: &str) -> Vec<u16> {
+    text.encode_utf16().chain(Some(0)).collect()
+}
+
+fn text(hdc: HDC, x: i32, y: i32, value: &str, color: u32) {
+    let wide = wstr(value);
+    unsafe {
+        SetTextColor(hdc, color);
+        TextOutW(hdc, x, y, wide.as_ptr(), (wide.len() - 1) as i32);
+    }
+}
+
+fn text_width(hdc: HDC, value: &str) -> i32 {
+    let wide = wstr(value);
+    let mut size = SIZE { cx: 0, cy: 0 };
+    unsafe {
+        GetTextExtentPoint32W(hdc, wide.as_ptr(), (wide.len() - 1) as i32, &mut size);
+    }
+    size.cx
+}
+
+fn clipped(hdc: HDC, x: i32, y: i32, value: &str, color: u32, width: i32) {
+    if text_width(hdc, value) <= width {
+        text(hdc, x, y, value, color);
+        return;
+    }
+    let mut end = value.len();
+    while end > 0 && text_width(hdc, &format!("{}…", &value[..end])) > width {
+        end = value[..end]
+            .char_indices()
+            .last()
+            .map(|(i, _)| i)
+            .unwrap_or(0);
+    }
+    if end > 0 {
+        text(hdc, x, y, &format!("{}…", &value[..end]), color);
+    }
+}
+
+fn fill(hdc: HDC, rect: &RECT, color: u32) {
+    unsafe {
+        let brush = CreateSolidBrush(color);
+        FillRect(hdc, rect, brush);
+        DeleteObject(brush);
+    }
+}
+
+fn divider(hdc: HDC, left: i32, top: i32, right: i32) {
+    fill(
+        hdc,
+        &RECT {
+            left,
+            top,
+            right,
+            bottom: top + 1,
+        },
+        DIVIDER,
+    );
+}
+
+fn sensor_color(sensor: &SensorReading) -> u32 {
+    let lower = sensor.name.to_ascii_lowercase();
+    if lower.contains("hot spot") && sensor.value >= 90.0 {
+        RED
+    } else if lower.contains("core") && sensor.value >= 83.0 {
+        RED
+    } else if lower.contains("temperature") && sensor.value >= 80.0 {
+        AMBER
+    } else {
+        VALUE
+    }
+}
+
+pub fn sensor_at(info: &SysInfo, y: i32) -> Option<SensorReading> {
+    let mut current_y = LIST_TOP + 35;
+    let mut previous_group = None;
+    for sensor in ordered_sensors(info).into_iter().take(MAX_ROWS) {
+        let group = sensor_group(&sensor.name);
+        if previous_group != Some(group) {
+            current_y += 22;
+            previous_group = Some(group);
+        }
+        if (current_y..current_y + ROW_HEIGHT).contains(&y) {
+            return Some(sensor);
+        }
+        current_y += ROW_HEIGHT;
+    }
+    None
+}
+
+pub fn sensor_at_point(info: &SysInfo, x: i32, y: i32) -> Option<SensorReading> {
+    if !(LIST_LEFT..LIST_LEFT + LIST_WIDTH).contains(&x) {
+        return None;
+    }
+    sensor_at(info, y)
+}
+
+pub fn draw_dashboard(
+    hdc: HDC,
+    client: &RECT,
+    info: &SysInfo,
+    history: &SensorHistory,
+    bold_font: isize,
+    language: Language,
+) {
+    let list_right = LIST_LEFT + LIST_WIDTH;
+    let panel_right = client.right - 16;
+    fill(
+        hdc,
+        &RECT {
+            left: LIST_LEFT,
+            top: LIST_TOP,
+            right: list_right,
+            bottom: client.bottom - 16,
+        },
+        SURFACE,
+    );
+    fill(
+        hdc,
+        &RECT {
+            left: list_right + 12,
+            top: LIST_TOP,
+            right: panel_right,
+            bottom: client.bottom - 16,
+        },
+        SURFACE,
+    );
+    text(
+        hdc,
+        LIST_LEFT + 16,
+        LIST_TOP + 14,
+        language.text(Key::Sensors),
+        accent(),
+    );
+    text(
+        hdc,
+        list_right + 28,
+        LIST_TOP + 14,
+        language.text(Key::Selected),
+        accent(),
+    );
+    divider(hdc, LIST_LEFT + 16, LIST_TOP + 34, list_right - 16);
+    divider(hdc, list_right + 28, LIST_TOP + 34, panel_right - 16);
+
+    let selected = history.selected_name();
+    let mut y = LIST_TOP + 42;
+    let mut previous_group = None;
+    for sensor in ordered_sensors(info).into_iter().take(MAX_ROWS) {
+        let group = sensor_group(&sensor.name);
+        if previous_group != Some(group) {
+            if previous_group.is_some() {
+                y += 3;
+            }
+            text(hdc, LIST_LEFT + 16, y, group_title(group, language), MUTED);
+            y += 20;
+            previous_group = Some(group);
+        }
+        if selected == Some(sensor.name.as_str()) {
+            fill(
+                hdc,
+                &RECT {
+                    left: LIST_LEFT + 8,
+                    top: y - 2,
+                    right: list_right - 8,
+                    bottom: y + 20,
+                },
+                SURFACE_RAISED,
+            );
+            fill(
+                hdc,
+                &RECT {
+                    left: LIST_LEFT + 8,
+                    top: y - 2,
+                    right: LIST_LEFT + 11,
+                    bottom: y + 20,
+                },
+                accent(),
+            );
+        }
+        clipped(hdc, LIST_LEFT + 20, y + 2, &sensor.name, LABEL, 310);
+        let previous = unsafe { SelectObject(hdc, bold_font) };
+        let value = format!("{:.1} {}", sensor.value, sensor.unit);
+        let value_x = list_right - 20 - text_width(hdc, &value);
+        text(hdc, value_x, y + 2, &value, sensor_color(&sensor));
+        unsafe {
+            SelectObject(hdc, previous);
+        }
+        divider(hdc, LIST_LEFT + 20, y + 22, list_right - 20);
+        y += ROW_HEIGHT;
+    }
+    if info.sensors.len() > MAX_ROWS {
+        text(
+            hdc,
+            LIST_LEFT + 20,
+            client.bottom - 39,
+            "More available sensors will appear here as the list is expanded.",
+            MUTED,
+        );
+    }
+    draw_selected_panel(
+        hdc,
+        list_right + 12,
+        LIST_TOP,
+        panel_right,
+        client.bottom - 16,
+        info,
+        history,
+        bold_font,
+        language,
+    );
+}
+
+fn draw_selected_panel(
+    hdc: HDC,
+    left: i32,
+    top: i32,
+    right: i32,
+    bottom: i32,
+    info: &SysInfo,
+    history: &SensorHistory,
+    bold_font: isize,
+    language: Language,
+) {
+    let selected = history
+        .selected_name()
+        .and_then(|name| info.sensors.iter().find(|s| s.name == name));
+    let Some(sensor) = selected else {
+        text(
+            hdc,
+            left + 16,
+            top + 64,
+            language.text(Key::ChooseSensor),
+            VALUE,
+        );
+        text(
+            hdc,
+            left + 16,
+            top + 88,
+            language.text(Key::ChooseSensorHint),
+            MUTED,
+        );
+        return;
+    };
+    clipped(
+        hdc,
+        left + 16,
+        top + 54,
+        &sensor.name,
+        VALUE,
+        right - left - 32,
+    );
+    let stats = history.stats().unwrap_or(crate::gui_state::SensorStats {
+        current: sensor.value,
+        min: sensor.value,
+        max: sensor.value,
+    });
+    let previous = unsafe { SelectObject(hdc, bold_font) };
+    text(
+        hdc,
+        left + 16,
+        top + 82,
+        &format!(
+            "{:.1} {}",
+            if history.shows_maximum() {
+                stats.max
+            } else {
+                stats.current
+            },
+            sensor.unit
+        ),
+        sensor_color(sensor),
+    );
+    unsafe {
+        SelectObject(hdc, previous);
+    }
+    text(
+        hdc,
+        left + 16,
+        top + 110,
+        &format!("{}  {:.1}", language.text(Key::Min), stats.min),
+        LABEL,
+    );
+    text(
+        hdc,
+        left + 16,
+        top + 132,
+        &format!("{}  {:.1}", language.text(Key::Max), stats.max),
+        LABEL,
+    );
+    text(
+        hdc,
+        right - 63,
+        top + 120,
+        language.text(Key::Reset),
+        accent(),
+    );
+    let graph = RECT {
+        left: left + 16,
+        top: top + 170,
+        right: right - 16,
+        bottom: bottom - 24,
+    };
+    fill(hdc, &graph, BACKGROUND);
+    draw_graph(hdc, &graph, &history.samples(), stats.min, stats.max);
+    text(
+        hdc,
+        graph.left + 8,
+        graph.top + 8,
+        language.text(Key::History),
+        MUTED,
+    );
+}
+
+fn draw_graph(hdc: HDC, rect: &RECT, samples: &[f32], min: f32, max: f32) {
+    if samples.len() < 2 {
+        return;
+    }
+    // Add visual headroom.  A 20% padded range prevents normal tiny changes
+    // from looking like dramatic full-height spikes.
+    let padding = ((max - min).abs() * 0.20).max(max.abs() * 0.03).max(0.5);
+    let lower = min - padding;
+    let span = (max + padding - lower).max(0.01);
+    unsafe {
+        let pen = CreatePen(PS_SOLID, 2, accent());
+        let old = SelectObject(hdc, pen);
+        for (index, value) in samples.iter().enumerate() {
+            let x = rect.left
+                + 8
+                + ((rect.right - rect.left - 16) as usize * index / (samples.len() - 1)) as i32;
+            let y = rect.bottom
+                - 10
+                - (((value - lower) / span) * (rect.bottom - rect.top - 28) as f32) as i32;
+            if index == 0 {
+                MoveToEx(hdc, x, y, std::ptr::null_mut());
+            } else {
+                LineTo(hdc, x, y);
+            }
+        }
+        SelectObject(hdc, old);
+        DeleteObject(pen);
+    }
+}
+
+pub fn draw_unavailable(hdc: HDC, client: &RECT, detail: &str, language: Language) {
+    fill(
+        hdc,
+        &RECT {
+            left: 16,
+            top: LIST_TOP,
+            right: client.right - 16,
+            bottom: client.bottom - 16,
+        },
+        SURFACE,
+    );
+    text(hdc, 36, LIST_TOP + 32, language.text(Key::Unavailable), RED);
+    clipped(hdc, 36, LIST_TOP + 62, detail, LABEL, client.right - 72);
+}
+
+pub fn draw_feedback_form(
+    hdc: HDC,
+    client: &RECT,
+    status: &str,
+    language: Language,
+    consent: bool,
+    sending: bool,
+) {
+    fill(
+        hdc,
+        &RECT {
+            left: 16,
+            top: LIST_TOP,
+            right: client.right - 16,
+            bottom: client.bottom - 16,
+        },
+        SURFACE,
+    );
+    text(
+        hdc,
+        36,
+        LIST_TOP + 28,
+        language.text(Key::Feedback),
+        accent(),
+    );
+    text(
+        hdc,
+        36,
+        LIST_TOP + 62,
+        "В отчёт попадут только название GPU, публичные датчики и введённый вами текст.",
+        LABEL,
+    );
+    text(
+        hdc,
+        36,
+        LIST_TOP + 96,
+        "Контакт для ответа (необязательно):",
+        LABEL,
+    );
+    text(hdc, 36, LIST_TOP + 130, "Описание проблемы:", MUTED);
+    let consent_rect = RECT {
+        left: 36,
+        top: LIST_TOP + 286,
+        right: 54,
+        bottom: LIST_TOP + 304,
+    };
+    fill(hdc, &consent_rect, if consent { accent() } else { DIVIDER });
+    if consent {
+        text(hdc, 39, LIST_TOP + 285, "✓", BACKGROUND);
+    }
+    text(
+        hdc,
+        64,
+        LIST_TOP + 286,
+        "Я согласен отправить указанные данные на сервер обратной связи.",
+        LABEL,
+    );
+    text(
+        hdc,
+        36,
+        LIST_TOP + 330,
+        if sending {
+            "ОТПРАВКА…"
+        } else {
+            "ОТПРАВИТЬ ОТЧЁТ"
+        },
+        if consent && !sending { accent() } else { MUTED },
+    );
+    clipped(hdc, 36, LIST_TOP + 368, status, LABEL, client.right - 72);
+    text(hdc, client.right - 95, LIST_TOP + 28, "НАЗАД", accent());
+}

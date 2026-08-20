@@ -1,0 +1,32 @@
+[package]
+name = "gpu-shark"
+version = "0.2.0-beta.2"
+edition = "2024"
+license = "Beerware"
+
+[[bin]]
+name = "gpu-shark-gui"
+path = "src/main.rs"
+
+[dependencies]
+libloading = "0.8"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+windows-sys = { version = "0.42", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Dwm",
+    "Win32_Graphics_Gdi",
+    "Win32_Networking_WinHttp",
+    "Win32_System_LibraryLoader",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+[build-dependencies]
+winres = "0.1"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
