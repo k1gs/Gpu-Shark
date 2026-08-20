@@ -1,21 +1,17 @@
-# GPU Shark Binary License 1.0
+"THE BEER-WARE LICENSE" (Revision 42)
 
-Copyright (c) 2026 k1gs. All rights reserved.
+Copyright (c) 2026 k1gs
 
-Permission is granted to download and use unmodified official GPU Shark binary
-release packages. Redistribution is permitted only when the complete package,
-including this license and all third-party notices, is kept intact and no fee is
-charged specifically for GPU Shark.
+As long as you retain this notice, you can do whatever you want with GPU Shark's
+original code and binaries. If we meet someday and you think this software is
+worth it, you can buy me a beer in return.
 
-You may not modify, disassemble, decompile, reverse engineer, sublicense, sell,
-or create derivative works from the GPU Shark proprietary binaries, except to
-the limited extent that applicable law expressly permits despite this clause.
-No source-code rights are granted.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-Open-source and third-party components included with or incorporated into GPU
-Shark remain governed by their own licenses and are excluded from the proprietary
-terms above. Their required notices are included in official release packages.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND. TO THE MAXIMUM
-EXTENT PERMITTED BY LAW, THE COPYRIGHT HOLDER IS NOT LIABLE FOR ANY CLAIM,
-DAMAGES OR OTHER LIABILITY ARISING FROM USE OF THE SOFTWARE.
+Third-party components are not relicensed by this notice and remain subject to
+their respective licenses supplied with the release assets.
