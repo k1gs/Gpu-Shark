@@ -5,6 +5,7 @@
 [![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?logo=windows)](https://github.com/k1gs/Gpu-Shark/releases)
 [![Latest release](https://img.shields.io/github/v/release/k1gs/Gpu-Shark?display_name=tag)](https://github.com/k1gs/Gpu-Shark/releases/latest)
 [![License: Beerware](https://img.shields.io/badge/license-Beerware-F5A623)](LICENSE)
+[![Public GUI build](https://github.com/k1gs/Gpu-Shark/actions/workflows/gui-build.yml/badge.svg)](https://github.com/k1gs/Gpu-Shark/actions/workflows/gui-build.yml)
 
 GPU Shark is a compact native Windows monitor for NVIDIA GPU and system
 telemetry. The interface is a lightweight Win32 application: no browser engine,
@@ -93,6 +94,19 @@ The public ABI is intentionally small: the GUI loads `gs.dll` beside the
 executable and calls export `q` to receive one JSON telemetry snapshot. Runtime
 and GUI versions should match. See [`gui-source/README.md`](gui-source/README.md)
 for the source-package notes.
+
+### GitHub Actions build
+
+The [`Build public GUI`](.github/workflows/gui-build.yml) workflow runs on GUI
+source changes and can also be started manually with a compatible runtime release
+tag. It formats, checks and builds the Rust GUI, downloads the prebuilt runtime,
+verifies its published SHA-256 and uploads a ready-to-run multi-file CI artifact.
+
+Repository Actions secrets `GPU_SHARK_FEEDBACK_HOST` and
+`GPU_SHARK_FEEDBACK_PATH` configure feedback for trusted `main` and manual
+builds. Pull requests always use a non-routable placeholder, including branches
+inside the repository. The workflow has read-only repository permissions and
+cannot create or modify releases.
 
 ## GPU support
 

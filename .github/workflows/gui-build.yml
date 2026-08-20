@@ -1,0 +1,123 @@
+name: Build public GUI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/gui-build.yml"
+      - "gui-source/**"
+      - "LICENSE"
+  pull_request:
+    paths:
+      - ".github/workflows/gui-build.yml"
+      - "gui-source/**"
+      - "LICENSE"
+  workflow_dispatch:
+    inputs:
+      runtime_tag:
+        description: "Release tag providing the prebuilt public runtime"
+        required: true
+        default: "v0.2.0-beta.2"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: public-gui-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  RUNTIME_TAG: ${{ inputs.runtime_tag || 'v0.2.0-beta.2' }}
+  GPU_SHARK_FEEDBACK_HOST: ${{ github.event_name != 'pull_request' && secrets.GPU_SHARK_FEEDBACK_HOST || 'feedback.invalid' }}
+  GPU_SHARK_FEEDBACK_PATH: ${{ github.event_name != 'pull_request' && secrets.GPU_SHARK_FEEDBACK_PATH || '/disabled' }}
+
+jobs:
+  build:
+    name: Windows x64 GUI
+    runs-on: windows-2022
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Install stable Rust
+        shell: pwsh
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable
+          rustup component add rustfmt
+          rustc --version
+          cargo --version
+
+      - name: Check formatting
+        shell: pwsh
+        run: cargo fmt --manifest-path .\gui-source\Cargo.toml -- --check
+
+      - name: Check public GUI
+        shell: pwsh
+        run: cargo check --manifest-path .\gui-source\Cargo.toml --locked
+
+      - name: Build public GUI
+        shell: pwsh
+        run: cargo build --manifest-path .\gui-source\Cargo.toml --release --locked
+
+      - name: Download and verify matching runtime
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $assetDirectory = Join-Path $env:RUNNER_TEMP "gpu-shark-runtime-assets"
+          New-Item -ItemType Directory -Path $assetDirectory | Out-Null
+
+          gh release download $env:RUNTIME_TAG `
+            --repo "${{ github.repository }}" `
+            --pattern "GPU-Shark-gui-runtime-win-x64.zip" `
+            --pattern "SHA256SUMS.txt" `
+            --dir $assetDirectory
+
+          $archiveName = "GPU-Shark-gui-runtime-win-x64.zip"
+          $archivePath = Join-Path $assetDirectory $archiveName
+          $checksumPath = Join-Path $assetDirectory "SHA256SUMS.txt"
+          $checksumLine = Get-Content -LiteralPath $checksumPath |
+            Where-Object { $_ -match "^[0-9A-Fa-f]{64}  $([regex]::Escape($archiveName))$" } |
+            Select-Object -First 1
+          if (-not $checksumLine) {
+            throw "Runtime archive is absent from SHA256SUMS.txt"
+          }
+          $expected = ($checksumLine -split "  ", 2)[0].ToUpperInvariant()
+          $actual = (Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash.ToUpperInvariant()
+          if ($actual -ne $expected) {
+            throw "Runtime archive checksum mismatch"
+          }
+
+          $bundle = Join-Path $env:RUNNER_TEMP "GPU-Shark-ci-win-x64"
+          Expand-Archive -LiteralPath $archivePath -DestinationPath $bundle
+          Copy-Item -LiteralPath ".\gui-source\target\release\gpu-shark-gui.exe" `
+            -Destination (Join-Path $bundle "GPU-Shark.exe")
+
+          @(
+            "GUI commit: ${{ github.sha }}"
+            "Runtime tag: $env:RUNTIME_TAG"
+            "Workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          ) | Set-Content -LiteralPath (Join-Path $bundle "BUILD_INFO.txt") -Encoding utf8
+
+          $required = @("GPU-Shark.exe", "gs.dll", "gsn.dll", "LICENSE", "THIRD_PARTY_NOTICES.md")
+          foreach ($name in $required) {
+            if (-not (Test-Path -LiteralPath (Join-Path $bundle $name))) {
+              throw "Packaged artifact is missing $name"
+            }
+          }
+          if (Get-ChildItem -LiteralPath $bundle -Recurse -Filter "*.pdb") {
+            throw "Debug symbols must not be uploaded"
+          }
+
+      - name: Upload CI package
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: GPU-Shark-ci-win-x64-${{ github.run_number }}
+          path: ${{ runner.temp }}\GPU-Shark-ci-win-x64
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 9
