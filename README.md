@@ -70,8 +70,9 @@ validation and rate limiting remain the security boundary.
 ## Build the public GUI
 
 The public GUI source is in [`gui-source/`](gui-source/). The telemetry provider
-implementation is not published. Matching prebuilt `gs.dll` and `gsn.dll` files
-are supplied in the `GPU-Shark-gui-runtime-win-x64.zip` release asset.
+implementation is not published. Matching prebuilt `gs.dll`, `gsn.dll` and any
+required helper DLLs are supplied in the `GPU-Shark-gui-runtime-win-x64.zip`
+release asset.
 
 1. Install the stable Rust toolchain and Visual Studio C++ build tools.
 2. Download the runtime asset matching the GUI version and extract its DLLs.
@@ -84,7 +85,7 @@ are supplied in the `GPU-Shark-gui-runtime-win-x64.zip` release asset.
 $env:GPU_SHARK_FEEDBACK_HOST = "your-compatible-feedback-host"
 $env:GPU_SHARK_FEEDBACK_PATH = "/your/api/path"
 cargo build --release
-Copy-Item C:\path\to\runtime\gs.dll, C:\path\to\runtime\gsn.dll .\target\release\
+Copy-Item C:\path\to\runtime\*.dll .\target\release\
 .\target\release\gpu-shark-gui.exe
 ```
 

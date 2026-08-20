@@ -4,10 +4,10 @@ This directory contains the public Rust/Win32 GUI client. It includes rendering,
 sensor history, Russian and English UI strings, and the consent-based feedback
 client.
 
-The telemetry provider itself is not part of this source tree. Use the prebuilt
-`gs.dll` and `gsn.dll` from the matching
-`GPU-Shark-gui-runtime-win-x64.zip` release asset and keep them beside the
-compiled executable. Mixing GUI and runtime versions is unsupported.
+The telemetry provider itself is not part of this source tree. Use all prebuilt
+DLLs from the matching `GPU-Shark-gui-runtime-win-x64.zip` release asset and
+keep them beside the compiled executable. Mixing GUI and runtime versions is
+unsupported.
 
 ## Build
 
@@ -18,7 +18,7 @@ PowerShell from this directory:
 $env:GPU_SHARK_FEEDBACK_HOST = "your-compatible-feedback-host"
 $env:GPU_SHARK_FEEDBACK_PATH = "/your/api/path"
 cargo build --release
-Copy-Item .\runtime\gs.dll, .\runtime\gsn.dll .\target\release\
+Copy-Item .\runtime\*.dll .\target\release\
 ```
 
 The official production endpoint is intentionally release-time configuration;
