@@ -1,8 +1,9 @@
 # GPU Shark GUI source
 
 This directory contains the public Rust/Win32 GUI client. It includes rendering,
-sensor history, Russian and English UI strings, and the consent-based feedback
-client.
+stable sensor identities and history, GPU-Z-compatible presentation of decoded
+NVIDIA PerfCap reasons, Russian and English UI strings, and the consent-based
+feedback client.
 
 The telemetry provider itself is not part of this source tree. Use all prebuilt
 DLLs from the matching `GPU-Shark-gui-runtime-win-x64.zip` release asset and

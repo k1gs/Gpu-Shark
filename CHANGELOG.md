@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.0
+
+- Promoted the native GUI line to the first stable `0.2.0` release.
+- Added GPU-Z-compatible decoding of NVIDIA PerfCap reasons: `Pwr`, `Thrm`,
+  `VRel`, `VOp`, `Idle` and `SLI`, including combined active reasons.
+- Added stable sensor identities so selection, history and maximum tracking
+  survive known provider display-name changes.
+- Kept unsupported sensors hidden and the unreliable Memory Clock disabled.
+- Updated the matching public runtime contract while preserving read-only
+  operation and the existing consent-based feedback boundary.
+
 ## 0.2.0-beta.2
 
 - Reworked the native interface into a fixed landscape sensor dashboard with

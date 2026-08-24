@@ -17,7 +17,9 @@ no heavyweight GUI framework and no background hardware control.
 
 - GPU Core, HotSpot and VRAM temperatures when the hardware exposes them
 - Separate fan RPM values on supported multi-fan boards
-- GPU, board and source power, voltage and performance-limit sensors
+- GPU, board and source power and voltage sensors
+- Decoded NVIDIA PerfCap reasons compatible with GPU-Z (`Pwr`, `Thrm`, `VRel`,
+  `VOp`, `Idle` and `SLI`) when the installed driver supports them
 - Additional GPU and system sensors below the primary graphics-card group
 - Live graph with a tighter scale for the selected sensor
 - Per-sensor maximum tracking, enabled by double-clicking a sensor row
@@ -27,7 +29,9 @@ no heavyweight GUI framework and no background hardware control.
 - Fixed landscape window with flicker-free double-buffered drawing
 
 GPU Shark does not invent a HotSpot value from Core, Memory or an unrelated
-sensor. Unsupported measurements remain unavailable.
+sensor. Unsupported measurements remain unavailable. PerfCap is informational:
+combined active reasons are listed together, unknown reason bits are shown as
+`Unknown`, and the field is hidden when the driver does not support the query.
 
 ## Download
 
