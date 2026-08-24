@@ -1,5 +1,6 @@
 use crate::gui_i18n::{Key, Language};
 use crate::gui_state::SensorHistory;
+use crate::sensor_model::{SensorGroup, SensorKind, metadata, sensor_id};
 use gpu_shark::{SensorReading, SysInfo};
 use windows_sys::Win32::Foundation::{RECT, SIZE};
 use windows_sys::Win32::Graphics::Gdi::{
@@ -36,67 +37,19 @@ pub fn accent() -> u32 {
 
 pub fn ordered_sensors(info: &SysInfo) -> Vec<SensorReading> {
     let mut sensors = info.sensors.clone();
-    sensors.retain(|sensor| !sensor.name.eq_ignore_ascii_case("Memory Clock"));
+    sensors.retain(|sensor| metadata(sensor).visible);
     sensors.sort_by_key(|sensor| {
-        (
-            sensor_group(&sensor.name),
-            sensor_priority(&sensor.name),
-            sensor.name.clone(),
-        )
+        let item = metadata(sensor);
+        (item.group, item.priority, sensor.name.clone())
     });
     sensors
 }
 
-fn sensor_group(name: &str) -> u8 {
-    let lower = name.to_ascii_lowercase();
-    if lower.contains("core")
-        || lower.contains("hot spot")
-        || lower.contains("fan")
-        || lower.contains("power")
-        || lower.contains("voltage")
-        || lower.contains("perfcap")
-        || lower.contains("performance limit")
-        || lower.contains("gpu clock")
-        || lower.contains("memory clock")
-    {
-        0
-    } else if lower.contains("cpu") || lower.contains("system") {
-        2
-    } else {
-        1
-    }
-}
-
-fn sensor_priority(name: &str) -> u8 {
-    let lower = name.to_ascii_lowercase();
-    if lower.contains("gpu core") {
-        0
-    } else if lower.contains("hot spot") {
-        1
-    } else if lower.contains("memory temperature") {
-        2
-    } else if lower.contains("fan") {
-        3
-    } else if lower.contains("gpu clock") {
-        4
-    } else if lower.contains("memory clock") {
-        5
-    } else if lower.contains("power") {
-        6
-    } else if lower.contains("voltage") {
-        7
-    } else if lower.contains("perfcap") || lower.contains("performance limit") {
-        8
-    } else {
-        9
-    }
-}
-
-fn group_title(group: u8, language: Language) -> &'static str {
+fn group_title(group: SensorGroup, language: Language) -> &'static str {
     match group {
-        0 => "GPU",
-        1 => language.text(Key::GpuActivity),
-        _ => language.text(Key::System),
+        SensorGroup::Gpu => "GPU",
+        SensorGroup::Activity => language.text(Key::GpuActivity),
+        SensorGroup::System => language.text(Key::System),
     }
 }
 
@@ -161,15 +114,11 @@ fn divider(hdc: HDC, left: i32, top: i32, right: i32) {
 }
 
 fn sensor_color(sensor: &SensorReading) -> u32 {
-    let lower = sensor.name.to_ascii_lowercase();
-    if lower.contains("hot spot") && sensor.value >= 90.0 {
-        RED
-    } else if lower.contains("core") && sensor.value >= 83.0 {
-        RED
-    } else if lower.contains("temperature") && sensor.value >= 80.0 {
-        AMBER
-    } else {
-        VALUE
+    match metadata(sensor).kind {
+        SensorKind::HotspotTemperature if sensor.value >= 90.0 => RED,
+        SensorKind::GpuCoreTemperature if sensor.value >= 83.0 => RED,
+        SensorKind::MemoryTemperature if sensor.value >= 80.0 => AMBER,
+        _ => VALUE,
     }
 }
 
@@ -177,7 +126,7 @@ pub fn sensor_at(info: &SysInfo, y: i32) -> Option<SensorReading> {
     let mut current_y = LIST_TOP + 35;
     let mut previous_group = None;
     for sensor in ordered_sensors(info).into_iter().take(MAX_ROWS) {
-        let group = sensor_group(&sensor.name);
+        let group = metadata(&sensor).group;
         if previous_group != Some(group) {
             current_y += 22;
             previous_group = Some(group);
@@ -244,11 +193,11 @@ pub fn draw_dashboard(
     divider(hdc, LIST_LEFT + 16, LIST_TOP + 34, list_right - 16);
     divider(hdc, list_right + 28, LIST_TOP + 34, panel_right - 16);
 
-    let selected = history.selected_name();
+    let selected = history.selected_id();
     let mut y = LIST_TOP + 42;
     let mut previous_group = None;
     for sensor in ordered_sensors(info).into_iter().take(MAX_ROWS) {
-        let group = sensor_group(&sensor.name);
+        let group = metadata(&sensor).group;
         if previous_group != Some(group) {
             if previous_group.is_some() {
                 y += 3;
@@ -257,7 +206,7 @@ pub fn draw_dashboard(
             y += 20;
             previous_group = Some(group);
         }
-        if selected == Some(sensor.name.as_str()) {
+        if selected.is_some_and(|id| *id == sensor_id(&sensor)) {
             fill(
                 hdc,
                 &RECT {
@@ -324,8 +273,8 @@ fn draw_selected_panel(
     language: Language,
 ) {
     let selected = history
-        .selected_name()
-        .and_then(|name| info.sensors.iter().find(|s| s.name == name));
+        .selected_id()
+        .and_then(|id| info.sensors.iter().find(|sensor| sensor_id(sensor) == *id));
     let Some(sensor) = selected else {
         text(
             hdc,

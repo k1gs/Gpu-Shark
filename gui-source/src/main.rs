@@ -7,6 +7,7 @@ mod feedback;
 mod gui_i18n;
 mod gui_state;
 mod gui_view;
+mod sensor_model;
 
 use gpu_shark::{SysInfo, dll_library_path, fetch_data_from_dll, load_driver_library};
 use std::sync::{
@@ -296,6 +297,18 @@ unsafe fn paint(hwnd: HWND) {
             language.text(gui_i18n::Key::RefreshHint),
             gui_view::rgb(190, 190, 190),
         );
+        if let Some(reason) = snapshot.as_ref().and_then(|snapshot| match snapshot {
+            Snapshot::Data(info) => info.perfcap_reason.as_deref(),
+            _ => None,
+        }) {
+            draw_text(
+                hdc,
+                576,
+                78,
+                &format!("PerfCap: {reason}"),
+                gui_view::rgb(190, 190, 190),
+            );
+        }
         if FEEDBACK_VISIBLE.load(Ordering::Acquire) {
             let status = FEEDBACK_STATUS
                 .get()
@@ -421,7 +434,7 @@ unsafe extern "system" fn wnd_proc(
                         }
                     } else if let Some(sensor) = gui_view::sensor_at_point(&info, x, y) {
                         if let Some(mut h) = SENSOR_HISTORY.get().and_then(|s| s.lock().ok()) {
-                            h.select(&sensor.name, sensor.value);
+                            h.select(&sensor);
                         }
                     }
                 }
@@ -438,7 +451,7 @@ unsafe extern "system" fn wnd_proc(
                 if let Some(Snapshot::Data(info)) = snapshot {
                     if let Some(sensor) = gui_view::sensor_at_point(&info, x, y) {
                         if let Some(mut h) = SENSOR_HISTORY.get().and_then(|s| s.lock().ok()) {
-                            h.select_maximum(&sensor.name, sensor.value);
+                            h.select_maximum(&sensor);
                         }
                     }
                 }

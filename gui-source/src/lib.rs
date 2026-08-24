@@ -19,6 +19,8 @@ pub struct SysInfo {
     pub delta: Option<f32>,
     #[serde(default)]
     pub sensors: Vec<SensorReading>,
+    #[serde(default)]
+    pub perfcap_reason: Option<String>,
     pub error: Option<String>,
 }
 

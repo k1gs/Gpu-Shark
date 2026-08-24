@@ -1,3 +1,4 @@
+use crate::sensor_model::{SensorId, sensor_id};
 use gpu_shark::SensorReading;
 use std::collections::VecDeque;
 
@@ -10,29 +11,30 @@ pub struct SensorStats {
 
 #[derive(Default)]
 pub struct SensorHistory {
-    selected: Option<String>,
+    selected: Option<SensorId>,
     stats: Option<SensorStats>,
     samples: VecDeque<f32>,
     show_maximum: bool,
 }
 
 impl SensorHistory {
-    pub fn select(&mut self, name: &str, current: f32) {
+    pub fn select(&mut self, sensor: &SensorReading) {
+        let id = sensor_id(sensor);
         self.show_maximum = false;
-        if self.selected.as_deref() != Some(name) {
-            self.selected = Some(name.to_owned());
+        if self.selected.as_ref() != Some(&id) {
+            self.selected = Some(id);
             self.stats = Some(SensorStats {
-                current,
-                min: current,
-                max: current,
+                current: sensor.value,
+                min: sensor.value,
+                max: sensor.value,
             });
             self.samples.clear();
-            self.samples.push_back(current);
+            self.samples.push_back(sensor.value);
         }
     }
 
-    pub fn select_maximum(&mut self, name: &str, current: f32) {
-        self.select(name, current);
+    pub fn select_maximum(&mut self, sensor: &SensorReading) {
+        self.select(sensor);
         self.show_maximum = true;
     }
 
@@ -40,15 +42,15 @@ impl SensorHistory {
         self.show_maximum
     }
 
-    pub fn selected_name(&self) -> Option<&str> {
-        self.selected.as_deref()
+    pub fn selected_id(&self) -> Option<&SensorId> {
+        self.selected.as_ref()
     }
 
     pub fn record(&mut self, sensors: &[SensorReading]) {
-        let Some(name) = self.selected.as_deref() else {
+        let Some(selected) = self.selected.as_ref() else {
             return;
         };
-        let Some(sensor) = sensors.iter().find(|sensor| sensor.name == name) else {
+        let Some(sensor) = sensors.iter().find(|sensor| sensor_id(sensor) == *selected) else {
             return;
         };
         let stats = self.stats.get_or_insert(SensorStats {
@@ -80,5 +82,31 @@ impl SensorHistory {
             self.samples.clear();
             self.samples.push_back(stats.current);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn reading(name: &str, value: f32) -> SensorReading {
+        SensorReading {
+            name: name.to_owned(),
+            value,
+            unit: "°C".to_owned(),
+        }
+    }
+
+    #[test]
+    fn history_survives_a_known_provider_alias_change() {
+        let mut history = SensorHistory::default();
+        history.select(&reading("GPU Core", 40.0));
+        history.record(&[reading("GPU Core Temperature", 52.0)]);
+
+        let stats = history.stats().expect("selected sensor stats");
+        assert_eq!(stats.current, 52.0);
+        assert_eq!(stats.min, 40.0);
+        assert_eq!(stats.max, 52.0);
+        assert_eq!(history.samples(), vec![40.0, 52.0]);
     }
 }
