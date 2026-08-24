@@ -33,22 +33,39 @@ pub struct SensorReading {
 
 type QueryFn = unsafe extern "C" fn(*mut u8, i32) -> i32;
 
+pub struct DriverLibrary {
+    library: Library,
+    _native_provider: Library,
+}
+
 pub fn dll_library_path() -> &'static str {
     "gs.dll"
 }
 
-pub fn load_driver_library() -> Result<Library, String> {
+pub fn load_driver_library() -> Result<DriverLibrary, String> {
     let executable =
         std::env::current_exe().map_err(|error| format!("Cannot locate executable: {error}"))?;
     let path = executable
         .parent()
         .ok_or_else(|| "Executable has no parent directory".to_string())?
         .join(dll_library_path());
-    unsafe { Library::new(&path) }
-        .map_err(|error| format!("Cannot load {}: {error}", path.display()))
+    let native_provider_path = path.with_file_name("gsn.dll");
+    let native_provider = unsafe { Library::new(&native_provider_path) }.map_err(|error| {
+        format!(
+            "Cannot load required component {}: {error}",
+            native_provider_path.display()
+        )
+    })?;
+    let library = unsafe { Library::new(&path) }
+        .map_err(|error| format!("Cannot load {}: {error}", path.display()))?;
+    Ok(DriverLibrary {
+        library,
+        _native_provider: native_provider,
+    })
 }
 
-pub fn fetch_data_from_dll(library: &Library) -> Result<SysInfo, Box<dyn std::error::Error>> {
+pub fn fetch_data_from_dll(driver: &DriverLibrary) -> Result<SysInfo, Box<dyn std::error::Error>> {
+    let library = &driver.library;
     unsafe {
         let query: Symbol<QueryFn> = library.get(b"q")?;
         let mut buffer = [0u8; 8192];
