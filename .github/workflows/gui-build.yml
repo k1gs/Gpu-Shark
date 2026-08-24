@@ -17,7 +17,7 @@ on:
       runtime_tag:
         description: "Release tag providing the prebuilt public runtime"
         required: true
-        default: "v0.2.0"
+        default: "v0.2.1"
         type: string
 
 permissions:
@@ -28,7 +28,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  RUNTIME_TAG: ${{ inputs.runtime_tag || 'v0.2.0' }}
+  RUNTIME_TAG: ${{ inputs.runtime_tag || 'v0.2.1' }}
   GPU_SHARK_FEEDBACK_HOST: ${{ github.event_name != 'pull_request' && secrets.GPU_SHARK_FEEDBACK_HOST || 'feedback.invalid' }}
   GPU_SHARK_FEEDBACK_PATH: ${{ github.event_name != 'pull_request' && secrets.GPU_SHARK_FEEDBACK_PATH || '/disabled' }}
 
