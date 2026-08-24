@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.1
+
+- Fixed the standalone single-executable package so its embedded native provider
+  is loaded from the private runtime cache and PerfCap remains available without
+  placing DLL files beside `GPU-Shark.exe`.
+- Changed embedded runtime cache validation from file-size checks to exact byte
+  comparison, preventing stale same-size components after an update.
+- Preserved the read-only hardware boundary and single-EXE user distribution.
+
 ## 0.2.0
 
 - Promoted the native GUI line to the first stable `0.2.0` release.
