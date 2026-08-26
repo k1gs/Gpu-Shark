@@ -5,9 +5,12 @@
 
 mod feedback;
 mod gui_i18n;
+mod gui_layout;
+mod gui_settings;
 mod gui_state;
 mod gui_view;
 mod sensor_model;
+mod settings;
 
 use gpu_shark::{SysInfo, dll_library_path, fetch_data_from_dll, load_driver_library};
 use std::sync::{
@@ -21,39 +24,69 @@ use windows_sys::Win32::Graphics::Dwm::{DWMWA_USE_IMMERSIVE_DARK_MODE, DwmSetWin
 use windows_sys::Win32::Graphics::Gdi::{
     BeginPaint, BitBlt, CLEARTYPE_QUALITY, CLIP_DEFAULT_PRECIS, CreateCompatibleBitmap,
     CreateCompatibleDC, CreateFontW, DEFAULT_CHARSET, DEFAULT_PITCH, DeleteDC, DeleteObject,
-    EndPaint, FF_DONTCARE, FW_BOLD, FW_NORMAL, HDC, InvalidateRect, OUT_DEFAULT_PRECIS,
-    PAINTSTRUCT, SRCCOPY, SelectObject, SetBkMode, TRANSPARENT, UpdateWindow,
+    EndPaint, FF_DONTCARE, FW_BOLD, FW_NORMAL, HDC, InvalidateRect, MM_ANISOTROPIC, MM_TEXT,
+    OUT_DEFAULT_PRECIS, PAINTSTRUCT, SRCCOPY, SelectObject, SetBkMode, SetMapMode,
+    SetViewportExtEx, SetWindowExtEx, TRANSPARENT, UpdateWindow,
 };
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows_sys::Win32::UI::HiDpi::GetDpiForSystem;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CS_DBLCLKS, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, CreateWindowExW, DefWindowProcW,
-    DestroyWindow, DispatchMessageW, ES_AUTOVSCROLL, ES_MULTILINE, GetClientRect, GetMessageW,
-    GetWindowTextW, ICON_SMALL, IDC_ARROW, IDI_APPLICATION, LoadCursorW, LoadIconW, MSG,
-    PostMessageW, PostQuitMessage, RegisterClassW, SW_SHOW, ShowWindow, TranslateMessage, WM_APP,
-    WM_CLOSE, WM_DESTROY, WM_ERASEBKGND, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_PAINT, WM_SETICON,
+    AdjustWindowRectEx, CS_DBLCLKS, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, CreateWindowExW,
+    DefWindowProcW, DestroyWindow, DispatchMessageW, ES_AUTOVSCROLL, ES_MULTILINE, GetClientRect,
+    GetMessageW, GetWindowTextW, ICON_SMALL, IDC_ARROW, IDI_APPLICATION, LoadCursorW, LoadIconW,
+    MSG, MoveWindow, PostMessageW, PostQuitMessage, RegisterClassW, SW_SHOW, SWP_NOACTIVATE,
+    SWP_NOZORDER, SetWindowPos, ShowWindow, TranslateMessage, WM_APP, WM_CLOSE, WM_DESTROY,
+    WM_DPICHANGED, WM_ERASEBKGND, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_PAINT, WM_SETICON,
     WNDCLASSW, WS_BORDER, WS_CAPTION, WS_CHILD, WS_MINIMIZEBOX, WS_SYSMENU, WS_VISIBLE, WS_VSCROLL,
 };
 
 const WM_APP_SNAPSHOT: u32 = WM_APP + 1;
 const WM_APP_FEEDBACK: u32 = WM_APP + 2;
-const WINDOW_WIDTH: i32 = 980;
-const WINDOW_HEIGHT: i32 = 660;
 static SHARED: OnceLock<Arc<Mutex<Option<Snapshot>>>> = OnceLock::new();
 static STOP_TX: OnceLock<mpsc::Sender<()>> = OnceLock::new();
 static SENSOR_HISTORY: OnceLock<Mutex<gui_state::SensorHistory>> = OnceLock::new();
 static FEEDBACK_VISIBLE: AtomicBool = AtomicBool::new(false);
 static FEEDBACK_EDIT: AtomicIsize = AtomicIsize::new(0);
 static FEEDBACK_CONTACT: AtomicIsize = AtomicIsize::new(0);
-static FEEDBACK_STATUS: OnceLock<Mutex<String>> = OnceLock::new();
+static FEEDBACK_STATUS: OnceLock<Mutex<FeedbackStatus>> = OnceLock::new();
 static FEEDBACK_CONSENT: AtomicBool = AtomicBool::new(false);
 static FEEDBACK_SENDING: AtomicBool = AtomicBool::new(false);
-static RUSSIAN_UI: AtomicBool = AtomicBool::new(true);
 
 #[derive(Clone)]
 enum Snapshot {
     Data(SysInfo),
     LoadFailed(String),
     FetchError(String),
+}
+
+#[derive(Clone, Default)]
+enum FeedbackStatus {
+    #[default]
+    Empty,
+    Required,
+    Sending,
+    Accepted(String),
+    Rejected(String),
+    PayloadTooLarge,
+    RateLimited,
+    Server,
+    Network(String),
+}
+
+impl FeedbackStatus {
+    fn localized(&self, language: gui_i18n::Language) -> String {
+        match self {
+            Self::Empty => String::new(),
+            Self::Required => language.feedback_required().into(),
+            Self::Sending => language.feedback_sending_status().into(),
+            Self::Accepted(report_id) => language.feedback_accepted(report_id),
+            Self::Rejected(detail) => language.feedback_rejected(detail),
+            Self::PayloadTooLarge => language.feedback_payload_too_large().into(),
+            Self::RateLimited => language.feedback_rate_limited().into(),
+            Self::Server => language.feedback_server_error().into(),
+            Self::Network(error) => language.feedback_network_error(error),
+        }
+    }
 }
 
 fn wstr(text: &str) -> Vec<u16> {
@@ -121,7 +154,38 @@ unsafe fn show_feedback(hwnd: HWND) {
                 ShowWindow(contact, SW_SHOW);
             }
         }
+        layout_feedback_controls(hwnd);
         InvalidateRect(hwnd, std::ptr::null(), 0);
+    }
+}
+
+unsafe fn layout_feedback_controls(hwnd: HWND) {
+    unsafe {
+        let mut client: RECT = std::mem::zeroed();
+        GetClientRect(hwnd, &mut client);
+        let sx =
+            |value| gui_layout::scale_to_client(value, gui_layout::BASE_CLIENT_WIDTH, client.right);
+        let sy = |value| {
+            gui_layout::scale_to_client(value, gui_layout::BASE_CLIENT_HEIGHT, client.bottom)
+        };
+        let edit = FEEDBACK_EDIT.load(Ordering::Acquire);
+        if edit != 0 {
+            MoveWindow(edit, sx(36), sy(285), sx(900), sy(105), 1);
+        }
+        let contact = FEEDBACK_CONTACT.load(Ordering::Acquire);
+        if contact != 0 {
+            MoveWindow(contact, sx(180), sy(225), sx(420), sy(26), 1);
+        }
+    }
+}
+
+unsafe fn logical_mouse_point(hwnd: HWND, lparam: LPARAM) -> (i32, i32) {
+    unsafe {
+        let physical_x = (lparam as u32 & 0xffff) as u16 as i16 as i32;
+        let physical_y = ((lparam as u32 >> 16) & 0xffff) as u16 as i16 as i32;
+        let mut client: RECT = std::mem::zeroed();
+        GetClientRect(hwnd, &mut client);
+        gui_layout::to_logical_point(physical_x, physical_y, client.right, client.bottom)
     }
 }
 
@@ -149,7 +213,7 @@ unsafe fn submit_feedback(hwnd: HWND) {
             FEEDBACK_SENDING.store(false, Ordering::Release);
             if let Some(slot) = FEEDBACK_STATUS.get() {
                 if let Ok(mut value) = slot.lock() {
-                    *value = "Введите сообщение и подтвердите согласие на отправку.".into();
+                    *value = FeedbackStatus::Required;
                 }
             }
             return;
@@ -162,34 +226,28 @@ unsafe fn submit_feedback(hwnd: HWND) {
             Some(Snapshot::Data(info)) => Some(info),
             _ => None,
         };
-        let locale = if RUSSIAN_UI.load(Ordering::Acquire) {
+        let locale = if gui_settings::is_russian() {
             "ru"
         } else {
             "en"
         };
         if let Some(slot) = FEEDBACK_STATUS.get() {
             if let Ok(mut value) = slot.lock() {
-                *value = "Отправка…".into();
+                *value = FeedbackStatus::Sending;
             }
         }
         InvalidateRect(hwnd, std::ptr::null(), 0);
         thread::spawn(move || {
             let result = feedback::submit(info.as_ref(), &note, Some(&contact), locale, consent);
             let status = match result {
-                Ok(report_id) => format!("Отчёт принят. Номер: {report_id}"),
+                Ok(report_id) => FeedbackStatus::Accepted(report_id),
                 Err(feedback::SubmitError::InvalidPayload(detail)) => {
-                    format!("Отчёт отклонён: {detail}")
+                    FeedbackStatus::Rejected(detail)
                 }
-                Err(feedback::SubmitError::PayloadTooLarge) => {
-                    "Отчёт превышает 256 КБ (413).".into()
-                }
-                Err(feedback::SubmitError::RateLimited) => {
-                    "Лимит исчерпан. Попробуйте позднее (429).".into()
-                }
-                Err(feedback::SubmitError::Server) => {
-                    "Временная ошибка сервера. Попробуйте позднее.".into()
-                }
-                Err(feedback::SubmitError::Network(error)) => format!("Ошибка сети: {error}"),
+                Err(feedback::SubmitError::PayloadTooLarge) => FeedbackStatus::PayloadTooLarge,
+                Err(feedback::SubmitError::RateLimited) => FeedbackStatus::RateLimited,
+                Err(feedback::SubmitError::Server) => FeedbackStatus::Server,
+                Err(feedback::SubmitError::Network(error)) => FeedbackStatus::Network(error),
             };
             if let Some(slot) = FEEDBACK_STATUS.get() {
                 if let Ok(mut value) = slot.lock() {
@@ -206,13 +264,33 @@ unsafe fn paint(hwnd: HWND) {
     unsafe {
         let mut ps: PAINTSTRUCT = std::mem::zeroed();
         let output_hdc = BeginPaint(hwnd, &mut ps);
-        let mut client: RECT = std::mem::zeroed();
-        GetClientRect(hwnd, &mut client);
+        let mut physical_client: RECT = std::mem::zeroed();
+        GetClientRect(hwnd, &mut physical_client);
+        let client = RECT {
+            left: 0,
+            top: 0,
+            right: gui_layout::BASE_CLIENT_WIDTH,
+            bottom: gui_layout::BASE_CLIENT_HEIGHT,
+        };
         // Draw the complete frame off-screen, then copy it in one operation.
         // This removes the visible background flash caused by 1 Hz updates.
         let hdc = CreateCompatibleDC(output_hdc);
-        let bitmap = CreateCompatibleBitmap(output_hdc, client.right, client.bottom);
+        let bitmap =
+            CreateCompatibleBitmap(output_hdc, physical_client.right, physical_client.bottom);
         let old_bitmap = SelectObject(hdc, bitmap);
+        SetMapMode(hdc, MM_ANISOTROPIC);
+        SetWindowExtEx(
+            hdc,
+            gui_layout::BASE_CLIENT_WIDTH,
+            gui_layout::BASE_CLIENT_HEIGHT,
+            std::ptr::null_mut(),
+        );
+        SetViewportExtEx(
+            hdc,
+            physical_client.right,
+            physical_client.bottom,
+            std::ptr::null_mut(),
+        );
         let brush = windows_sys::Win32::Graphics::Gdi::CreateSolidBrush(gui_view::BACKGROUND);
         windows_sys::Win32::Graphics::Gdi::FillRect(hdc, &client, brush);
         DeleteObject(brush);
@@ -254,7 +332,7 @@ unsafe fn paint(hwnd: HWND) {
             .get()
             .and_then(|slot| slot.lock().ok())
             .and_then(|slot| slot.clone());
-        let language = gui_i18n::Language::from_russian(RUSSIAN_UI.load(Ordering::Acquire));
+        let language = gui_i18n::Language::from_russian(gui_settings::is_russian());
         let name = match &snapshot {
             Some(Snapshot::Data(info)) => info.gpu_name.as_deref().unwrap_or("Unknown GPU"),
             _ => "GPU Shark",
@@ -270,13 +348,9 @@ unsafe fn paint(hwnd: HWND) {
         );
         draw_text(
             hdc,
-            client.right - 215,
+            client.right - 265,
             18,
-            if RUSSIAN_UI.load(Ordering::Acquire) {
-                "RU"
-            } else {
-                "EN"
-            },
+            language.text(gui_i18n::Key::Settings),
             gui_view::accent(),
         );
         if matches!(&snapshot, Some(Snapshot::Data(info)) if info.gpu_name.is_none()) {
@@ -288,15 +362,17 @@ unsafe fn paint(hwnd: HWND) {
                 gui_view::rgb(246, 211, 45),
             );
         }
-        draw_text(hdc, 16, 51, name, gui_view::rgb(255, 255, 255));
-        SelectObject(hdc, previous);
-        draw_text(
+        gui_view::clipped(
             hdc,
             16,
-            78,
-            language.text(gui_i18n::Key::RefreshHint),
-            gui_view::rgb(190, 190, 190),
+            51,
+            name,
+            gui_view::rgb(255, 255, 255),
+            client.right - 32,
         );
+        SelectObject(hdc, previous);
+        let refresh_hint = language.refresh_hint(gui_settings::refresh_interval_ms());
+        draw_text(hdc, 16, 78, &refresh_hint, gui_view::rgb(190, 190, 190));
         if let Some(reason) = snapshot.as_ref().and_then(|snapshot| match snapshot {
             Snapshot::Data(info) => info.perfcap_reason.as_deref(),
             _ => None,
@@ -313,7 +389,7 @@ unsafe fn paint(hwnd: HWND) {
             let status = FEEDBACK_STATUS
                 .get()
                 .and_then(|slot| slot.lock().ok())
-                .map(|value| value.clone())
+                .map(|value| value.localized(language))
                 .unwrap_or_default();
             gui_view::draw_feedback_form(
                 hdc,
@@ -351,12 +427,13 @@ unsafe fn paint(hwnd: HWND) {
         SelectObject(hdc, old_font);
         DeleteObject(bold_font);
         DeleteObject(main_font);
+        SetMapMode(hdc, MM_TEXT);
         BitBlt(
             output_hdc,
             0,
             0,
-            client.right,
-            client.bottom,
+            physical_client.right,
+            physical_client.bottom,
             hdc,
             0,
             0,
@@ -390,15 +467,13 @@ unsafe extern "system" fn wnd_proc(
                 0
             }
             WM_LBUTTONDOWN => {
-                let x = (lparam & 0xffff) as i32;
-                let y = ((lparam >> 16) & 0xffff) as i32;
+                let (x, y) = logical_mouse_point(hwnd, lparam);
                 if x >= 800 && y <= 54 {
                     show_feedback(hwnd);
                     return 0;
                 }
-                if (730..800).contains(&x) && y <= 54 {
-                    RUSSIAN_UI.fetch_xor(true, Ordering::AcqRel);
-                    InvalidateRect(hwnd, std::ptr::null(), 0);
+                if (660..800).contains(&x) && y <= 54 {
+                    gui_settings::show(hwnd);
                     return 0;
                 }
                 if FEEDBACK_VISIBLE.load(Ordering::Acquire) {
@@ -442,8 +517,7 @@ unsafe extern "system" fn wnd_proc(
                 0
             }
             WM_LBUTTONDBLCLK => {
-                let x = (lparam & 0xffff) as i32;
-                let y = ((lparam >> 16) & 0xffff) as i32;
+                let (x, y) = logical_mouse_point(hwnd, lparam);
                 let snapshot = SHARED
                     .get()
                     .and_then(|slot| slot.lock().ok())
@@ -459,6 +533,21 @@ unsafe extern "system" fn wnd_proc(
                 0
             }
             WM_ERASEBKGND => 1,
+            WM_DPICHANGED => {
+                let suggested = &*(lparam as *const RECT);
+                SetWindowPos(
+                    hwnd,
+                    0,
+                    suggested.left,
+                    suggested.top,
+                    suggested.right - suggested.left,
+                    suggested.bottom - suggested.top,
+                    SWP_NOACTIVATE | SWP_NOZORDER,
+                );
+                layout_feedback_controls(hwnd);
+                InvalidateRect(hwnd, std::ptr::null(), 0);
+                0
+            }
             WM_CLOSE => {
                 DestroyWindow(hwnd);
                 0
@@ -504,13 +593,17 @@ fn worker_main(hwnd: HWND, shared: Arc<Mutex<Option<Snapshot>>>, stop: mpsc::Rec
         unsafe {
             PostMessageW(hwnd, WM_APP_SNAPSHOT, 0, 0);
         }
-        if stop.recv_timeout(Duration::from_secs(1)).is_ok() {
+        if stop
+            .recv_timeout(Duration::from_millis(gui_settings::refresh_interval_ms()))
+            .is_ok()
+        {
             break;
         }
     }
 }
 
 fn main() {
+    gui_settings::initialize();
     unsafe {
         let instance = GetModuleHandleW(std::ptr::null());
         let class = wstr("GpuSharkMonitorWindow");
@@ -531,15 +624,28 @@ fn main() {
         };
         RegisterClassW(&wc);
         let title = wstr(&format!("GPU Shark {}", env!("CARGO_PKG_VERSION")));
+        let style = WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
+        let dpi = GetDpiForSystem().max(gui_layout::DEFAULT_DPI);
+        let mut base_window_rect = RECT {
+            left: 0,
+            top: 0,
+            right: gui_layout::BASE_CLIENT_WIDTH,
+            bottom: gui_layout::BASE_CLIENT_HEIGHT,
+        };
+        AdjustWindowRectEx(&mut base_window_rect, style, 0, 0);
+        let window_width =
+            gui_layout::scale_for_dpi(base_window_rect.right - base_window_rect.left, dpi);
+        let window_height =
+            gui_layout::scale_for_dpi(base_window_rect.bottom - base_window_rect.top, dpi);
         let hwnd = CreateWindowExW(
             0,
             class.as_ptr(),
             title.as_ptr(),
-            WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
+            style,
             CW_USEDEFAULT,
             CW_USEDEFAULT,
-            WINDOW_WIDTH,
-            WINDOW_HEIGHT,
+            window_width,
+            window_height,
             0,
             0,
             instance,
@@ -569,7 +675,7 @@ fn main() {
         let _ = SHARED.set(shared.clone());
         let _ = STOP_TX.set(tx);
         let _ = SENSOR_HISTORY.set(Mutex::new(gui_state::SensorHistory::default()));
-        let _ = FEEDBACK_STATUS.set(Mutex::new(String::new()));
+        let _ = FEEDBACK_STATUS.set(Mutex::new(FeedbackStatus::default()));
         ShowWindow(hwnd, SW_SHOW);
         UpdateWindow(hwnd);
         let worker = thread::Builder::new()

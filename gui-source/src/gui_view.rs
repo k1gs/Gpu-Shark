@@ -2,6 +2,7 @@ use crate::gui_i18n::{Key, Language};
 use crate::gui_state::SensorHistory;
 use crate::sensor_model::{SensorGroup, SensorKind, metadata, sensor_id};
 use gpu_shark::{SensorReading, SysInfo};
+use std::sync::atomic::{AtomicU32, Ordering};
 use windows_sys::Win32::Foundation::{RECT, SIZE};
 use windows_sys::Win32::Graphics::Gdi::{
     CreatePen, CreateSolidBrush, DeleteObject, FillRect, GetTextExtentPoint32W, HDC, LineTo,
@@ -9,6 +10,7 @@ use windows_sys::Win32::Graphics::Gdi::{
 };
 
 pub const BACKGROUND: u32 = rgb(30, 30, 30);
+static ACCENT_COLOR: AtomicU32 = AtomicU32::new(rgb(87, 227, 137));
 const SURFACE: u32 = rgb(36, 36, 36);
 const SURFACE_RAISED: u32 = rgb(48, 48, 48);
 const DIVIDER: u32 = rgb(72, 72, 72);
@@ -29,10 +31,11 @@ pub const fn rgb(r: u8, g: u8, b: u8) -> u32 {
 }
 
 pub fn accent() -> u32 {
-    // High-contrast GNOME green. Windows colorization can be too dark or
-    // desaturated for small GDI text on this surface, so the app uses a stable
-    // accessible accent instead of copying an unreadable system shade.
-    rgb(87, 227, 137)
+    ACCENT_COLOR.load(Ordering::Acquire)
+}
+
+pub fn set_accent(color: u32) {
+    ACCENT_COLOR.store(color, Ordering::Release);
 }
 
 pub fn ordered_sensors(info: &SysInfo) -> Vec<SensorReading> {
@@ -74,7 +77,7 @@ fn text_width(hdc: HDC, value: &str) -> i32 {
     size.cx
 }
 
-fn clipped(hdc: HDC, x: i32, y: i32, value: &str, color: u32, width: i32) {
+pub fn clipped(hdc: HDC, x: i32, y: i32, value: &str, color: u32, width: i32) {
     if text_width(hdc, value) <= width {
         text(hdc, x, y, value, color);
         return;
@@ -436,17 +439,23 @@ pub fn draw_feedback_form(
         hdc,
         36,
         LIST_TOP + 62,
-        "В отчёт попадут только название GPU, публичные датчики и введённый вами текст.",
+        language.text(Key::FeedbackPrivacy),
         LABEL,
     );
     text(
         hdc,
         36,
         LIST_TOP + 96,
-        "Контакт для ответа (необязательно):",
+        language.text(Key::FeedbackContact),
         LABEL,
     );
-    text(hdc, 36, LIST_TOP + 130, "Описание проблемы:", MUTED);
+    text(
+        hdc,
+        36,
+        LIST_TOP + 130,
+        language.text(Key::FeedbackDescription),
+        MUTED,
+    );
     let consent_rect = RECT {
         left: 36,
         top: LIST_TOP + 286,
@@ -461,7 +470,7 @@ pub fn draw_feedback_form(
         hdc,
         64,
         LIST_TOP + 286,
-        "Я согласен отправить указанные данные на сервер обратной связи.",
+        language.text(Key::FeedbackConsent),
         LABEL,
     );
     text(
@@ -469,12 +478,65 @@ pub fn draw_feedback_form(
         36,
         LIST_TOP + 330,
         if sending {
-            "ОТПРАВКА…"
+            language.text(Key::FeedbackSending)
         } else {
-            "ОТПРАВИТЬ ОТЧЁТ"
+            language.text(Key::FeedbackSubmit)
         },
         if consent && !sending { accent() } else { MUTED },
     );
     clipped(hdc, 36, LIST_TOP + 368, status, LABEL, client.right - 72);
-    text(hdc, client.right - 95, LIST_TOP + 28, "НАЗАД", accent());
+    text(
+        hdc,
+        client.right - 95,
+        LIST_TOP + 28,
+        language.text(Key::Back),
+        accent(),
+    );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn info(sensors: &[(&str, f32, &str)]) -> SysInfo {
+        let sensors = sensors
+            .iter()
+            .map(|(name, value, unit)| {
+                serde_json::json!({"name": name, "value": value, "unit": unit})
+            })
+            .collect::<Vec<_>>();
+        serde_json::from_value(serde_json::json!({
+            "gpu_name": "Visual fixture",
+            "sensors": sensors
+        }))
+        .expect("safe visual fixture")
+    }
+
+    #[test]
+    fn ordered_rows_hide_memory_clock_and_keep_expected_groups() {
+        let snapshot = info(&[
+            ("CPU Package", 50.0, "°C"),
+            ("Memory Clock", 10501.0, "MHz"),
+            ("D3D 3D", 90.0, "%"),
+            ("GPU Core", 60.0, "°C"),
+            ("PerfCap", 1.0, "%"),
+        ]);
+
+        let rows = ordered_sensors(&snapshot);
+        let names = rows.iter().map(|row| row.name.as_str()).collect::<Vec<_>>();
+        assert_eq!(names, ["GPU Core", "PerfCap", "D3D 3D", "CPU Package"]);
+    }
+
+    #[test]
+    fn list_hit_testing_cannot_select_the_graph_panel() {
+        let snapshot = info(&[("GPU Core", 60.0, "°C"), ("Hot Spot", 74.0, "°C")]);
+
+        assert_eq!(
+            sensor_at_point(&snapshot, 100, 190)
+                .expect("first visible sensor")
+                .name,
+            "GPU Core"
+        );
+        assert!(sensor_at_point(&snapshot, 700, 190).is_none());
+    }
 }

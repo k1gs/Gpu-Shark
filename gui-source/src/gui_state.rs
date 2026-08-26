@@ -109,4 +109,22 @@ mod tests {
         assert_eq!(stats.max, 52.0);
         assert_eq!(history.samples(), vec![40.0, 52.0]);
     }
+
+    #[test]
+    fn maximum_mode_and_reset_follow_double_click_semantics() {
+        let mut history = SensorHistory::default();
+        history.select_maximum(&reading("GPU Core", 40.0));
+        history.record(&[reading("GPU Core", 55.0)]);
+        history.record(&[reading("GPU Core", 48.0)]);
+
+        assert!(history.shows_maximum());
+        assert_eq!(history.stats().expect("tracked stats").max, 55.0);
+
+        history.reset();
+        let reset = history.stats().expect("reset stats");
+        assert_eq!(reset.current, 48.0);
+        assert_eq!(reset.min, 48.0);
+        assert_eq!(reset.max, 48.0);
+        assert_eq!(history.samples(), vec![48.0]);
+    }
 }
