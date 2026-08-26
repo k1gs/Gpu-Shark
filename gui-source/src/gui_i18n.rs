@@ -40,6 +40,12 @@ impl Language {
             }
             (Self::Russian, Key::FeedbackSending) => "ОТПРАВКА…",
             (Self::Russian, Key::FeedbackSubmit) => "ОТПРАВИТЬ ОТЧЁТ",
+            (Self::Russian, Key::PerfCapDetail) => {
+                "Текущая причина ограничения производительности NVIDIA."
+            }
+            (Self::Russian, Key::PerfCapNoGraph) => {
+                "Категориальное состояние без числового графика."
+            }
             (Self::Russian, Key::Back) => "НАЗАД",
             (Self::Russian, Key::Settings) => "НАСТРОЙКИ",
             (Self::Russian, Key::UnknownGpu) => {
@@ -67,6 +73,8 @@ impl Language {
             }
             (Self::English, Key::FeedbackSending) => "SENDING…",
             (Self::English, Key::FeedbackSubmit) => "SEND REPORT",
+            (Self::English, Key::PerfCapDetail) => "Current NVIDIA performance-limit reason.",
+            (Self::English, Key::PerfCapNoGraph) => "Categorical state without a numeric graph.",
             (Self::English, Key::Back) => "BACK",
             (Self::English, Key::Settings) => "SETTINGS",
             (Self::English, Key::UnknownGpu) => "Unknown GPU — send a report through feedback.",
@@ -208,6 +216,8 @@ pub enum Key {
     FeedbackConsent,
     FeedbackSending,
     FeedbackSubmit,
+    PerfCapDetail,
+    PerfCapNoGraph,
     Back,
     Settings,
     UnknownGpu,

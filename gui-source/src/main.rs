@@ -373,18 +373,6 @@ unsafe fn paint(hwnd: HWND) {
         SelectObject(hdc, previous);
         let refresh_hint = language.refresh_hint(gui_settings::refresh_interval_ms());
         draw_text(hdc, 16, 78, &refresh_hint, gui_view::rgb(190, 190, 190));
-        if let Some(reason) = snapshot.as_ref().and_then(|snapshot| match snapshot {
-            Snapshot::Data(info) => info.perfcap_reason.as_deref(),
-            _ => None,
-        }) {
-            draw_text(
-                hdc,
-                576,
-                78,
-                &format!("PerfCap: {reason}"),
-                gui_view::rgb(190, 190, 190),
-            );
-        }
         if FEEDBACK_VISIBLE.load(Ordering::Acquire) {
             let status = FEEDBACK_STATUS
                 .get()
@@ -581,7 +569,8 @@ fn worker_main(hwnd: HWND, shared: Arc<Mutex<Option<Snapshot>>>, stop: mpsc::Rec
         let snapshot = match fetch_data_from_dll(&library) {
             Ok(info) => {
                 if let Some(mut h) = SENSOR_HISTORY.get().and_then(|s| s.lock().ok()) {
-                    h.record(&info.sensors);
+                    let sensors = gui_view::ordered_sensors(&info);
+                    h.record(&sensors);
                 }
                 Snapshot::Data(info)
             }

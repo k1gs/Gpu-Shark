@@ -32,6 +32,7 @@ pub struct SensorMetadata {
     pub kind: SensorKind,
     pub priority: u8,
     pub visible: bool,
+    pub graphable: bool,
 }
 
 pub fn metadata(sensor: &SensorReading) -> SensorMetadata {
@@ -111,6 +112,7 @@ pub fn metadata(sensor: &SensorReading) -> SensorMetadata {
         kind,
         priority,
         visible: kind != SensorKind::MemoryClock,
+        graphable: kind != SensorKind::PerfCap,
     }
 }
 
@@ -165,6 +167,8 @@ mod tests {
             sensor_id(&reading("PerfCap", "%")),
             sensor_id(&reading("Performance Limit", "%"))
         );
+        assert!(!metadata(&reading("PerfCap Reason", "Pwr")).graphable);
+        assert!(metadata(&reading("GPU Core", "°C")).graphable);
     }
 
     #[test]

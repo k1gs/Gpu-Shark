@@ -40,6 +40,19 @@ pub fn set_accent(color: u32) {
 
 pub fn ordered_sensors(info: &SysInfo) -> Vec<SensorReading> {
     let mut sensors = info.sensors.clone();
+    if let Some(reason) = info
+        .perfcap_reason
+        .as_deref()
+        .map(str::trim)
+        .filter(|reason| !reason.is_empty())
+    {
+        sensors.retain(|sensor| metadata(sensor).kind != SensorKind::PerfCap);
+        sensors.push(SensorReading {
+            name: "PerfCap Reason".to_owned(),
+            value: 0.0,
+            unit: reason.to_owned(),
+        });
+    }
     sensors.retain(|sensor| metadata(sensor).visible);
     sensors.sort_by_key(|sensor| {
         let item = metadata(sensor);
@@ -125,6 +138,16 @@ fn sensor_color(sensor: &SensorReading) -> u32 {
     }
 }
 
+fn sensor_value(sensor: &SensorReading) -> String {
+    if metadata(sensor).kind == SensorKind::PerfCap
+        && sensor.name.trim().eq_ignore_ascii_case("PerfCap Reason")
+    {
+        sensor.unit.clone()
+    } else {
+        format!("{:.1} {}", sensor.value, sensor.unit)
+    }
+}
+
 pub fn sensor_at(info: &SysInfo, y: i32) -> Option<SensorReading> {
     let mut current_y = LIST_TOP + 35;
     let mut previous_group = None;
@@ -159,6 +182,7 @@ pub fn draw_dashboard(
 ) {
     let list_right = LIST_LEFT + LIST_WIDTH;
     let panel_right = client.right - 16;
+    let sensors = ordered_sensors(info);
     fill(
         hdc,
         &RECT {
@@ -199,8 +223,8 @@ pub fn draw_dashboard(
     let selected = history.selected_id();
     let mut y = LIST_TOP + 42;
     let mut previous_group = None;
-    for sensor in ordered_sensors(info).into_iter().take(MAX_ROWS) {
-        let group = metadata(&sensor).group;
+    for sensor in sensors.iter().take(MAX_ROWS) {
+        let group = metadata(sensor).group;
         if previous_group != Some(group) {
             if previous_group.is_some() {
                 y += 3;
@@ -209,7 +233,7 @@ pub fn draw_dashboard(
             y += 20;
             previous_group = Some(group);
         }
-        if selected.is_some_and(|id| *id == sensor_id(&sensor)) {
+        if selected.is_some_and(|id| *id == sensor_id(sensor)) {
             fill(
                 hdc,
                 &RECT {
@@ -233,16 +257,16 @@ pub fn draw_dashboard(
         }
         clipped(hdc, LIST_LEFT + 20, y + 2, &sensor.name, LABEL, 310);
         let previous = unsafe { SelectObject(hdc, bold_font) };
-        let value = format!("{:.1} {}", sensor.value, sensor.unit);
+        let value = sensor_value(sensor);
         let value_x = list_right - 20 - text_width(hdc, &value);
-        text(hdc, value_x, y + 2, &value, sensor_color(&sensor));
+        text(hdc, value_x, y + 2, &value, sensor_color(sensor));
         unsafe {
             SelectObject(hdc, previous);
         }
         divider(hdc, LIST_LEFT + 20, y + 22, list_right - 20);
         y += ROW_HEIGHT;
     }
-    if info.sensors.len() > MAX_ROWS {
+    if sensors.len() > MAX_ROWS {
         text(
             hdc,
             LIST_LEFT + 20,
@@ -275,9 +299,10 @@ fn draw_selected_panel(
     bold_font: isize,
     language: Language,
 ) {
+    let sensors = ordered_sensors(info);
     let selected = history
         .selected_id()
-        .and_then(|id| info.sensors.iter().find(|sensor| sensor_id(sensor) == *id));
+        .and_then(|id| sensors.iter().find(|sensor| sensor_id(sensor) == *id));
     let Some(sensor) = selected else {
         text(
             hdc,
@@ -303,6 +328,36 @@ fn draw_selected_panel(
         VALUE,
         right - left - 32,
     );
+    if metadata(sensor).kind == SensorKind::PerfCap {
+        let value = sensor_value(sensor);
+        let previous = unsafe { SelectObject(hdc, bold_font) };
+        clipped(
+            hdc,
+            left + 16,
+            top + 82,
+            &value,
+            accent(),
+            right - left - 32,
+        );
+        unsafe {
+            SelectObject(hdc, previous);
+        }
+        text(
+            hdc,
+            left + 16,
+            top + 118,
+            language.text(Key::PerfCapDetail),
+            LABEL,
+        );
+        text(
+            hdc,
+            left + 16,
+            top + 142,
+            language.text(Key::PerfCapNoGraph),
+            MUTED,
+        );
+        return;
+    }
     let stats = history.stats().unwrap_or(crate::gui_state::SensorStats {
         current: sensor.value,
         min: sensor.value,
@@ -514,17 +569,32 @@ mod tests {
 
     #[test]
     fn ordered_rows_hide_memory_clock_and_keep_expected_groups() {
-        let snapshot = info(&[
+        let mut snapshot = info(&[
             ("CPU Package", 50.0, "°C"),
             ("Memory Clock", 10501.0, "MHz"),
             ("D3D 3D", 90.0, "%"),
             ("GPU Core", 60.0, "°C"),
             ("PerfCap", 1.0, "%"),
         ]);
+        snapshot.perfcap_reason = Some("Pwr, VRel".to_owned());
 
         let rows = ordered_sensors(&snapshot);
         let names = rows.iter().map(|row| row.name.as_str()).collect::<Vec<_>>();
-        assert_eq!(names, ["GPU Core", "PerfCap", "D3D 3D", "CPU Package"]);
+        assert_eq!(
+            names,
+            ["GPU Core", "PerfCap Reason", "D3D 3D", "CPU Package"]
+        );
+        let perfcap = rows
+            .iter()
+            .find(|sensor| metadata(sensor).kind == SensorKind::PerfCap)
+            .expect("categorical PerfCap row");
+        assert_eq!(perfcap.unit, "Pwr, VRel");
+        assert_eq!(
+            rows.iter()
+                .filter(|sensor| metadata(sensor).kind == SensorKind::PerfCap)
+                .count(),
+            1
+        );
     }
 
     #[test]

@@ -1,4 +1,4 @@
-use crate::sensor_model::{SensorId, sensor_id};
+use crate::sensor_model::{SensorId, metadata, sensor_id};
 use gpu_shark::SensorReading;
 use std::collections::VecDeque;
 
@@ -21,6 +21,12 @@ impl SensorHistory {
     pub fn select(&mut self, sensor: &SensorReading) {
         let id = sensor_id(sensor);
         self.show_maximum = false;
+        if !metadata(sensor).graphable {
+            self.selected = Some(id);
+            self.stats = None;
+            self.samples.clear();
+            return;
+        }
         if self.selected.as_ref() != Some(&id) {
             self.selected = Some(id);
             self.stats = Some(SensorStats {
@@ -35,7 +41,7 @@ impl SensorHistory {
 
     pub fn select_maximum(&mut self, sensor: &SensorReading) {
         self.select(sensor);
-        self.show_maximum = true;
+        self.show_maximum = metadata(sensor).graphable;
     }
 
     pub fn shows_maximum(&self) -> bool {
@@ -53,6 +59,11 @@ impl SensorHistory {
         let Some(sensor) = sensors.iter().find(|sensor| sensor_id(sensor) == *selected) else {
             return;
         };
+        if !metadata(sensor).graphable {
+            self.stats = None;
+            self.samples.clear();
+            return;
+        }
         let stats = self.stats.get_or_insert(SensorStats {
             current: sensor.value,
             min: sensor.value,
@@ -126,5 +137,22 @@ mod tests {
         assert_eq!(reset.min, 48.0);
         assert_eq!(reset.max, 48.0);
         assert_eq!(history.samples(), vec![48.0]);
+    }
+    #[test]
+    fn categorical_perfcap_selection_has_no_numeric_history() {
+        let perfcap = SensorReading {
+            name: "PerfCap Reason".to_owned(),
+            value: 0.0,
+            unit: "Pwr, VRel".to_owned(),
+        };
+        let mut history = SensorHistory::default();
+
+        history.select_maximum(&perfcap);
+        history.record(std::slice::from_ref(&perfcap));
+
+        assert_eq!(history.selected_id(), Some(&sensor_id(&perfcap)));
+        assert!(!history.shows_maximum());
+        assert!(history.stats().is_none());
+        assert!(history.samples().is_empty());
     }
 }
