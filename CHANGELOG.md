@@ -1,5 +1,17 @@
 # Changelog
 
+
+## 0.2.2
+
+- Added a persistent native Settings window for language, refresh interval and
+  accent selection, with safe recovery from missing or malformed settings.
+- Changed the default interface language to English while keeping the complete
+  Russian localization, including the feedback experience.
+- Moved the NVIDIA PerfCap reason into the regular sensor list and added a
+  dedicated categorical detail view without a misleading numeric graph.
+- Refreshed the project README with a clearer feature overview, supported-GPU
+  table, roadmap, build guide and contribution workflow.
+- Added AMD GPU support as a long-term idea without an active schedule.
 ## 0.2.1
 
 - Fixed the standalone single-executable package so its embedded native provider
