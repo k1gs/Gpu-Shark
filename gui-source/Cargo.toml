@@ -6,9 +6,10 @@ license = "Beerware"
 
 [[bin]]
 name = "gpu-shark-gui"
-path = "src/main.rs"
+path = "src/egui_main.rs"
 
 [dependencies]
+eframe = { version = "0.36.1", default-features = false, features = ["accesskit", "default_fonts", "glow"] }
 libloading = "0.8"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
