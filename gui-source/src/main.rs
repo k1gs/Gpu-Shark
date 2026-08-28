@@ -23,9 +23,9 @@ use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows_sys::Win32::Graphics::Dwm::{DWMWA_USE_IMMERSIVE_DARK_MODE, DwmSetWindowAttribute};
 use windows_sys::Win32::Graphics::Gdi::{
     BeginPaint, BitBlt, CLEARTYPE_QUALITY, CLIP_DEFAULT_PRECIS, CreateCompatibleBitmap,
-    CreateCompatibleDC, CreateFontW, DEFAULT_CHARSET, DEFAULT_PITCH, DeleteDC, DeleteObject,
-    EndPaint, FF_DONTCARE, FW_BOLD, FW_NORMAL, HDC, InvalidateRect, MM_ANISOTROPIC, MM_TEXT,
-    OUT_DEFAULT_PRECIS, PAINTSTRUCT, SRCCOPY, SelectObject, SetBkMode, SetMapMode,
+    CreateCompatibleDC, CreateFontW, CreateSolidBrush, DEFAULT_CHARSET, DEFAULT_PITCH, DeleteDC,
+    DeleteObject, EndPaint, FF_DONTCARE, FW_BOLD, FW_NORMAL, HDC, InvalidateRect, MM_ANISOTROPIC,
+    MM_TEXT, OUT_DEFAULT_PRECIS, PAINTSTRUCT, SRCCOPY, SelectObject, SetBkMode, SetMapMode,
     SetViewportExtEx, SetWindowExtEx, TRANSPARENT, UpdateWindow,
 };
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
@@ -33,11 +33,12 @@ use windows_sys::Win32::UI::HiDpi::GetDpiForSystem;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     AdjustWindowRectEx, CS_DBLCLKS, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, CreateWindowExW,
     DefWindowProcW, DestroyWindow, DispatchMessageW, ES_AUTOVSCROLL, ES_MULTILINE, GetClientRect,
-    GetMessageW, GetWindowTextW, ICON_SMALL, IDC_ARROW, IDI_APPLICATION, LoadCursorW, LoadIconW,
-    MSG, MoveWindow, PostMessageW, PostQuitMessage, RegisterClassW, SW_SHOW, SWP_NOACTIVATE,
-    SWP_NOZORDER, SetWindowPos, ShowWindow, TranslateMessage, WM_APP, WM_CLOSE, WM_DESTROY,
-    WM_DPICHANGED, WM_ERASEBKGND, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_PAINT, WM_SETICON,
-    WNDCLASSW, WS_BORDER, WS_CAPTION, WS_CHILD, WS_MINIMIZEBOX, WS_SYSMENU, WS_VISIBLE, WS_VSCROLL,
+    GetMessageW, GetWindowTextW, ICON_SMALL, IDC_ARROW, IDI_APPLICATION, IMAGE_ICON, LR_SHARED,
+    LoadCursorW, LoadIconW, LoadImageW, MSG, MoveWindow, PostMessageW, PostQuitMessage,
+    RegisterClassW, SW_SHOW, SWP_NOACTIVATE, SWP_NOZORDER, SetWindowPos, ShowWindow,
+    TranslateMessage, WM_APP, WM_CLOSE, WM_CTLCOLOREDIT, WM_DESTROY, WM_DPICHANGED, WM_ERASEBKGND,
+    WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_PAINT, WM_SETICON, WNDCLASSW, WS_BORDER, WS_CAPTION,
+    WS_CHILD, WS_MINIMIZEBOX, WS_SYSMENU, WS_VISIBLE, WS_VSCROLL,
 };
 
 const WM_APP_SNAPSHOT: u32 = WM_APP + 1;
@@ -46,8 +47,12 @@ static SHARED: OnceLock<Arc<Mutex<Option<Snapshot>>>> = OnceLock::new();
 static STOP_TX: OnceLock<mpsc::Sender<()>> = OnceLock::new();
 static SENSOR_HISTORY: OnceLock<Mutex<gui_state::SensorHistory>> = OnceLock::new();
 static FEEDBACK_VISIBLE: AtomicBool = AtomicBool::new(false);
+static ABOUT_VISIBLE: AtomicBool = AtomicBool::new(false);
 static FEEDBACK_EDIT: AtomicIsize = AtomicIsize::new(0);
 static FEEDBACK_CONTACT: AtomicIsize = AtomicIsize::new(0);
+static EDIT_BACKGROUND_BRUSH: OnceLock<isize> = OnceLock::new();
+static ABOUT_ICON: OnceLock<isize> = OnceLock::new();
+static HEADER_NAV: OnceLock<Mutex<gui_view::HeaderNavLayout>> = OnceLock::new();
 static FEEDBACK_STATUS: OnceLock<Mutex<FeedbackStatus>> = OnceLock::new();
 static FEEDBACK_CONSENT: AtomicBool = AtomicBool::new(false);
 static FEEDBACK_SENDING: AtomicBool = AtomicBool::new(false);
@@ -109,6 +114,7 @@ fn draw_text(hdc: HDC, x: i32, y: i32, text: &str, color: u32) {
 
 unsafe fn show_feedback(hwnd: HWND) {
     unsafe {
+        ABOUT_VISIBLE.store(false, Ordering::Release);
         FEEDBACK_VISIBLE.store(true, Ordering::Release);
         let edit = FEEDBACK_EDIT.load(Ordering::Acquire);
         if edit == 0 {
@@ -122,10 +128,10 @@ unsafe fn show_feedback(hwnd: HWND) {
                     | (ES_MULTILINE as u32)
                     | (ES_AUTOVSCROLL as u32)
                     | WS_VSCROLL,
-                36,
-                285,
-                900,
-                105,
+                gui_view::FEEDBACK_MESSAGE_EDIT.left,
+                gui_view::FEEDBACK_MESSAGE_EDIT.top,
+                gui_view::FEEDBACK_MESSAGE_EDIT.right - gui_view::FEEDBACK_MESSAGE_EDIT.left,
+                gui_view::FEEDBACK_MESSAGE_EDIT.bottom - gui_view::FEEDBACK_MESSAGE_EDIT.top,
                 hwnd,
                 0,
                 GetModuleHandleW(std::ptr::null()),
@@ -137,10 +143,10 @@ unsafe fn show_feedback(hwnd: HWND) {
                 wstr("EDIT").as_ptr(),
                 std::ptr::null(),
                 WS_CHILD | WS_VISIBLE | WS_BORDER,
-                180,
-                225,
-                420,
-                26,
+                gui_view::FEEDBACK_CONTACT_EDIT.left,
+                gui_view::FEEDBACK_CONTACT_EDIT.top,
+                gui_view::FEEDBACK_CONTACT_EDIT.right - gui_view::FEEDBACK_CONTACT_EDIT.left,
+                gui_view::FEEDBACK_CONTACT_EDIT.bottom - gui_view::FEEDBACK_CONTACT_EDIT.top,
                 hwnd,
                 0,
                 GetModuleHandleW(std::ptr::null()),
@@ -159,6 +165,28 @@ unsafe fn show_feedback(hwnd: HWND) {
     }
 }
 
+unsafe fn hide_feedback_controls() {
+    unsafe {
+        let edit = FEEDBACK_EDIT.load(Ordering::Acquire);
+        if edit != 0 {
+            ShowWindow(edit, 0);
+        }
+        let contact = FEEDBACK_CONTACT.load(Ordering::Acquire);
+        if contact != 0 {
+            ShowWindow(contact, 0);
+        }
+    }
+}
+
+unsafe fn show_about(hwnd: HWND) {
+    unsafe {
+        FEEDBACK_VISIBLE.store(false, Ordering::Release);
+        ABOUT_VISIBLE.store(true, Ordering::Release);
+        hide_feedback_controls();
+        InvalidateRect(hwnd, std::ptr::null(), 0);
+    }
+}
+
 unsafe fn layout_feedback_controls(hwnd: HWND) {
     unsafe {
         let mut client: RECT = std::mem::zeroed();
@@ -170,11 +198,27 @@ unsafe fn layout_feedback_controls(hwnd: HWND) {
         };
         let edit = FEEDBACK_EDIT.load(Ordering::Acquire);
         if edit != 0 {
-            MoveWindow(edit, sx(36), sy(285), sx(900), sy(105), 1);
+            let rect = &gui_view::FEEDBACK_MESSAGE_EDIT;
+            MoveWindow(
+                edit,
+                sx(rect.left),
+                sy(rect.top),
+                sx(rect.right - rect.left),
+                sy(rect.bottom - rect.top),
+                1,
+            );
         }
         let contact = FEEDBACK_CONTACT.load(Ordering::Acquire);
         if contact != 0 {
-            MoveWindow(contact, sx(180), sy(225), sx(420), sy(26), 1);
+            let rect = &gui_view::FEEDBACK_CONTACT_EDIT;
+            MoveWindow(
+                contact,
+                sx(rect.left),
+                sy(rect.top),
+                sx(rect.right - rect.left),
+                sy(rect.bottom - rect.top),
+                1,
+            );
         }
     }
 }
@@ -339,20 +383,35 @@ unsafe fn paint(hwnd: HWND) {
         };
         let previous = SelectObject(hdc, bold_font);
         draw_text(hdc, 16, 18, "GPU SHARK", gui_view::accent());
+        let feedback_text = language.text(gui_i18n::Key::Feedback);
+        let settings_text = language.text(gui_i18n::Key::Settings);
+        let about_text = language.text(gui_i18n::Key::About);
+        let header_nav = gui_view::header_nav_layout(
+            client.right,
+            gui_view::text_width(hdc, about_text),
+            gui_view::text_width(hdc, settings_text),
+            gui_view::text_width(hdc, feedback_text),
+        );
+        if let Some(slot) = HEADER_NAV.get() {
+            if let Ok(mut current) = slot.lock() {
+                *current = header_nav;
+            }
+        }
         draw_text(
             hdc,
-            client.right - 145,
+            header_nav.feedback.0,
             18,
-            language.text(gui_i18n::Key::Feedback),
+            feedback_text,
             gui_view::accent(),
         );
         draw_text(
             hdc,
-            client.right - 265,
+            header_nav.settings.0,
             18,
-            language.text(gui_i18n::Key::Settings),
+            settings_text,
             gui_view::accent(),
         );
+        draw_text(hdc, header_nav.about.0, 18, about_text, gui_view::accent());
         if matches!(&snapshot, Some(Snapshot::Data(info)) if info.gpu_name.is_none()) {
             draw_text(
                 hdc,
@@ -386,6 +445,30 @@ unsafe fn paint(hwnd: HWND) {
                 language,
                 FEEDBACK_CONSENT.load(Ordering::Acquire),
                 FEEDBACK_SENDING.load(Ordering::Acquire),
+            );
+        } else if ABOUT_VISIBLE.load(Ordering::Acquire) {
+            let instance = GetModuleHandleW(std::ptr::null());
+            let icon = *ABOUT_ICON.get_or_init(|| {
+                let resource_icon = LoadImageW(
+                    instance,
+                    1usize as *const u16,
+                    IMAGE_ICON,
+                    128,
+                    128,
+                    LR_SHARED,
+                );
+                if resource_icon != 0 {
+                    resource_icon
+                } else {
+                    LoadIconW(0, IDI_APPLICATION)
+                }
+            });
+            gui_view::draw_about(
+                hdc,
+                &client,
+                icon,
+                language,
+                concat!("v", env!("CARGO_PKG_VERSION")),
             );
         } else {
             match &snapshot {
@@ -456,30 +539,38 @@ unsafe extern "system" fn wnd_proc(
             }
             WM_LBUTTONDOWN => {
                 let (x, y) = logical_mouse_point(hwnd, lparam);
-                if x >= 800 && y <= 54 {
-                    show_feedback(hwnd);
-                    return 0;
-                }
-                if (660..800).contains(&x) && y <= 54 {
-                    gui_settings::show(hwnd);
-                    return 0;
+                if y <= 54 {
+                    if let Some(nav) = HEADER_NAV.get().and_then(|slot| slot.lock().ok()) {
+                        if gui_view::header_link_contains(nav.feedback, x) {
+                            show_feedback(hwnd);
+                            return 0;
+                        }
+                        if gui_view::header_link_contains(nav.settings, x) {
+                            gui_settings::show(hwnd);
+                            return 0;
+                        }
+                        if gui_view::header_link_contains(nav.about, x) {
+                            show_about(hwnd);
+                            return 0;
+                        }
+                    }
                 }
                 if FEEDBACK_VISIBLE.load(Ordering::Acquire) {
-                    if x >= 30 && x <= 720 && (400..=438).contains(&y) {
+                    if gui_view::point_in_rect(&gui_view::FEEDBACK_CONSENT_HIT, x, y) {
                         FEEDBACK_CONSENT.fetch_xor(true, Ordering::AcqRel);
-                    } else if x >= 30 && x <= 480 && (445..=490).contains(&y) {
+                    } else if gui_view::point_in_rect(&gui_view::FEEDBACK_SUBMIT_HIT, x, y) {
                         submit_feedback(hwnd);
                     }
                     if x >= 850 && y <= 170 {
                         FEEDBACK_VISIBLE.store(false, Ordering::Release);
-                        let edit = FEEDBACK_EDIT.load(Ordering::Acquire);
-                        if edit != 0 {
-                            ShowWindow(edit, 0);
-                        }
-                        let contact = FEEDBACK_CONTACT.load(Ordering::Acquire);
-                        if contact != 0 {
-                            ShowWindow(contact, 0);
-                        }
+                        hide_feedback_controls();
+                    }
+                    InvalidateRect(hwnd, std::ptr::null(), 0);
+                    return 0;
+                }
+                if ABOUT_VISIBLE.load(Ordering::Acquire) {
+                    if x >= 850 && y <= 170 {
+                        ABOUT_VISIBLE.store(false, Ordering::Release);
                     }
                     InvalidateRect(hwnd, std::ptr::null(), 0);
                     return 0;
@@ -505,6 +596,10 @@ unsafe extern "system" fn wnd_proc(
                 0
             }
             WM_LBUTTONDBLCLK => {
+                if FEEDBACK_VISIBLE.load(Ordering::Acquire) || ABOUT_VISIBLE.load(Ordering::Acquire)
+                {
+                    return 0;
+                }
                 let (x, y) = logical_mouse_point(hwnd, lparam);
                 let snapshot = SHARED
                     .get()
@@ -521,6 +616,18 @@ unsafe extern "system" fn wnd_proc(
                 0
             }
             WM_ERASEBKGND => 1,
+            WM_CTLCOLOREDIT => {
+                let control_hdc = _wparam as HDC;
+                windows_sys::Win32::Graphics::Gdi::SetTextColor(
+                    control_hdc,
+                    gui_view::rgb(255, 255, 255),
+                );
+                windows_sys::Win32::Graphics::Gdi::SetBkColor(
+                    control_hdc,
+                    gui_view::rgb(36, 36, 36),
+                );
+                *EDIT_BACKGROUND_BRUSH.get_or_init(|| CreateSolidBrush(gui_view::rgb(36, 36, 36)))
+            }
             WM_DPICHANGED => {
                 let suggested = &*(lparam as *const RECT);
                 SetWindowPos(
@@ -665,6 +772,11 @@ fn main() {
         let _ = STOP_TX.set(tx);
         let _ = SENSOR_HISTORY.set(Mutex::new(gui_state::SensorHistory::default()));
         let _ = FEEDBACK_STATUS.set(Mutex::new(FeedbackStatus::default()));
+        let _ = HEADER_NAV.set(Mutex::new(gui_view::HeaderNavLayout {
+            about: (0, 0),
+            settings: (0, 0),
+            feedback: (0, 0),
+        }));
         ShowWindow(hwnd, SW_SHOW);
         UpdateWindow(hwnd);
         let worker = thread::Builder::new()

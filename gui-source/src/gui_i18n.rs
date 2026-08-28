@@ -40,6 +40,14 @@ impl Language {
             }
             (Self::Russian, Key::FeedbackSending) => "ОТПРАВКА…",
             (Self::Russian, Key::FeedbackSubmit) => "ОТПРАВИТЬ ОТЧЁТ",
+            (Self::Russian, Key::About) => "О ПРОГРАММЕ",
+            (Self::Russian, Key::AboutTagline) => "Компактный монитор телеметрии GPU.",
+            (Self::Russian, Key::AboutReadOnly) => {
+                "Только мониторинг. Управление оборудованием отсутствует."
+            }
+            (Self::Russian, Key::AboutLicense) => {
+                "Публичный GUI распространяется по лицензии Beerware."
+            }
             (Self::Russian, Key::PerfCapDetail) => {
                 "Текущая причина ограничения производительности NVIDIA."
             }
@@ -73,6 +81,14 @@ impl Language {
             }
             (Self::English, Key::FeedbackSending) => "SENDING…",
             (Self::English, Key::FeedbackSubmit) => "SEND REPORT",
+            (Self::English, Key::About) => "ABOUT",
+            (Self::English, Key::AboutTagline) => "A compact GPU telemetry monitor.",
+            (Self::English, Key::AboutReadOnly) => {
+                "Monitoring only. No hardware controls are available."
+            }
+            (Self::English, Key::AboutLicense) => {
+                "The public GUI is distributed under the Beerware license."
+            }
             (Self::English, Key::PerfCapDetail) => "Current NVIDIA performance-limit reason.",
             (Self::English, Key::PerfCapNoGraph) => "Categorical state without a numeric graph.",
             (Self::English, Key::Back) => "BACK",
@@ -194,6 +210,7 @@ mod tests {
             Language::Russian.feedback_server_error(),
             "Временная ошибка сервера. Попробуйте позднее."
         );
+        assert_eq!(Language::Russian.text(super::Key::About), "О ПРОГРАММЕ");
     }
 }
 
@@ -216,6 +233,10 @@ pub enum Key {
     FeedbackConsent,
     FeedbackSending,
     FeedbackSubmit,
+    About,
+    AboutTagline,
+    AboutReadOnly,
+    AboutLicense,
     PerfCapDetail,
     PerfCapNoGraph,
     Back,
