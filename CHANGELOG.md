@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.3
+
+- Fixed the feedback form so localized labels no longer overlap its input
+  controls and both text fields follow the dark interface.
+- Added a localized About view with the GPU Shark logo, application version,
+  read-only statement and Beerware notice.
+- Changed the top navigation to use measured GDI text widths, keeping visible
+  spacing and matching click targets in both English and Russian.
+- Made the public CI build produce the same standalone single executable by
+  embedding a checksum-verified released runtime without publishing provider
+  source or the production feedback endpoint.
+
 
 ## 0.2.2
 

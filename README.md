@@ -45,6 +45,7 @@ stay hidden instead of being replaced with guessed values.[^sensor-availability]
 - Live graph for the selected sensor
 - Per-sensor maximum tracking, enabled by double-clicking a sensor row
 - Persistent language, refresh interval and accent settings
+- Localized About view with the project logo and application version
 - Consent-based feedback form with no automatic submission
 - Fixed landscape layout with flicker-free double-buffered drawing
 
@@ -154,12 +155,12 @@ Matching public runtime DLLs are supplied through the
 
 ### Local build
 
-1. Download the matching runtime asset and extract its DLLs.
+1. Download the matching runtime asset and extract it.
 2. Open PowerShell in <code>gui-source/</code>.
 3. Configure a compatible feedback destination. The production destination is
    not stored in public source.
 4. Format, test and build the GUI.
-5. Place the runtime DLLs beside the resulting executable.
+5. Build either an adjacent-runtime development package or a standalone EXE.
 
 ~~~powershell
 $env:GPU_SHARK_FEEDBACK_HOST = "your-compatible-feedback-host"
@@ -173,6 +174,14 @@ Copy-Item C:\path\to\runtime\*.dll .\target\release\
 .\target\release\gpu-shark-gui.exe
 ~~~
 
+For the official standalone layout, embed the verified runtime while building:
+
+~~~powershell
+$env:GPU_SHARK_EMBED_PUBLIC_RUNTIME = "1"
+$env:GPU_SHARK_PUBLIC_PAYLOAD_DIR = "C:\path\to\verified-runtime"
+cargo build --release --locked
+~~~
+
 The GUI loads <code>gs.dll</code> beside the executable and calls the small
 public export <code>q</code> to receive one privacy-filtered JSON telemetry
 snapshot. Runtime and GUI versions must match.
@@ -181,8 +190,9 @@ snapshot. Runtime and GUI versions must match.
 
 The [Build public GUI](.github/workflows/gui-build.yml) workflow formats,
 checks and builds the GUI, downloads the matching runtime, verifies its
-published SHA-256 and uploads a ready-to-run CI artifact. The workflow has
-read-only repository permissions and cannot publish or modify releases.
+published SHA-256, embeds it and uploads a standalone single-EXE CI artifact.
+The workflow has read-only repository permissions and cannot publish or modify
+releases.
 
 ## Contributing
 
@@ -242,7 +252,6 @@ Bug reports are welcome through [GitHub Issues](https://github.com/k1gs/Gpu-Shar
     exact same board. Core or VRAM will never be relabeled as HotSpot.
 [^stress-test]: Any future stress test must be explicitly started by the user
     and remain isolated from clocks, voltage, firmware and fan-control paths.
-[^official-build]: Public source can build and audit the GUI against a matching
-    released runtime. Reproducing the official standalone EXE also requires the
-    private provider build pipeline, which is intentionally outside the public
-    repository.
+[^official-build]: Public source can build and audit the GUI and reproduce the
+    standalone packaging against a checksum-verified released runtime. Provider
+    DLL implementation source remains intentionally outside this repository.
