@@ -11,7 +11,7 @@
 
 **A compact, native and honest NVIDIA telemetry monitor for Windows.**
 
-[Download](#download) · [GPU support](#gpu-support) · [Roadmap](#roadmap) · [Build](#build-the-public-gui) · [Contribute](#contributing)
+[Download](#download) · [GPU support](#gpu-support) · [Roadmap](#roadmap) · [Build](#build-the-public-gui) · [Contribute](#contributing) · [Russian](https://github.com/k1gs/Gpu-Shark/blob/main/README_RU.md) 
 
 </div>
 
