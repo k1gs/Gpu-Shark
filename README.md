@@ -61,6 +61,13 @@ of visible sensors depends on the GPU, board design, driver and firmware.
 Enhanced temperature support is deliberately tracked per validated device
 profile.[^sensor-availability]
 
+> [!WARNING]
+> GeForce RTX 50-series HotSpot support is **beta**. The current verified
+> enhanced profile is the desktop GeForce RTX 5050 (10DE:2D83); other RTX 50
+> cards remain conservative until their exact hardware profiles are validated.
+> GPU Shark marks any displayed RTX 50 HotSpot row as <code>BETA</code>. The
+> label does not manufacture a missing reading.
+
 | GPU | Core | HotSpot | VRAM temperature | Profile status |
 |---|:---:|:---:|:---:|---|
 | GeForce RTX 2060 SUPER | Yes | Validated | Board-dependent | Validated |
@@ -71,6 +78,7 @@ profile.[^sensor-availability]
 | GeForce RTX 3080 | Yes | Validated | Validated | Validated |
 | GeForce RTX 4060 | Yes | Validated | Board-dependent | Validated |
 | GeForce RTX 4090 | Yes | Validated | Under validation | HotSpot validated |
+| GeForce RTX 5050 | Yes | Beta[^rtx50] | Validated | Exact desktop profile |
 | GeForce RTX 5070 | Yes | In progress[^rtx50] | Yes on tested board | Experimental |
 | GeForce RTX 5070 Ti | Yes | In progress[^rtx50] | Yes on tested board | Experimental |
 | Other NVIDIA GPUs | Usually | Driver/board-dependent | Driver/board-dependent | Conservative fallback |
@@ -86,7 +94,7 @@ If a measurement cannot be confirmed, GPU Shark leaves it unavailable.
 
 | Status | Direction |
 |---|---|
-| 🟡 In progress | Implement validated HotSpot telemetry for GeForce RTX 50-series cards[^rtx50] |
+| 🧪 Beta | Expand validated HotSpot telemetry for GeForce RTX 50-series cards; RTX 5050 is the first exact beta profile[^rtx50] |
 | 🟡 In progress | Add more useful and correctly defined sensors |
 | 🔵 Planned | Rework and polish the GUI |
 | 🔵 Planned | Add Linux support |
@@ -95,7 +103,7 @@ If a measurement cannot be confirmed, GPU Shark leaves it unavailable.
 | 🧪 Research | Built-in opt-in stress testing, including VRAM and memory-error checks[^stress-test] |
 | Someday | Explore AMD GPU support after the NVIDIA experience and telemetry contracts are mature |
 
-The immediate focus is the GUI polish pass, RTX 50 validation and expanding the
+The immediate focus is the GUI polish pass, RTX 50 beta validation and expanding the
 sensor model without weakening the read-only or privacy guarantees.
 
 AMD GPU support is a long-term idea only: there is no active implementation or
@@ -247,9 +255,10 @@ Bug reports are welcome through [GitHub Issues](https://github.com/k1gs/Gpu-Shar
 [^sensor-availability]: Sensor availability varies between GPU chips, board
     partners, driver versions and firmware. A listed GPU model does not imply
     that every board exposes every measurement.
-[^rtx50]: RTX 50 Core and VRAM telemetry has been observed on tested cards, but
-    HotSpot remains unavailable until it is independently correlated on the
-    exact same board. Core or VRAM will never be relabeled as HotSpot.
+[^rtx50]: RTX 50 HotSpot support is beta and evidence-gated. The desktop RTX
+    5050 10DE:2D83 profile has an independently validated HotSpot path; other
+    RTX 50 cards remain unavailable until they have their own exact same-board
+    evidence. Core or VRAM will never be relabeled as HotSpot.
 [^stress-test]: Any future stress test must be explicitly started by the user
     and remain isolated from clocks, voltage, firmware and fan-control paths.
 [^official-build]: Public source can build and audit the GUI and reproduce the

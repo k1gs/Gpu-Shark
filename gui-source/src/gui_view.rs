@@ -125,6 +125,33 @@ pub fn ordered_sensors(info: &SysInfo) -> Vec<SensorReading> {
     sensors
 }
 
+fn is_geforce_rtx_50_series(gpu_name: Option<&str>) -> bool {
+    let Some(name) = gpu_name.map(str::to_ascii_lowercase) else {
+        return false;
+    };
+    if !name.contains("geforce rtx") {
+        return false;
+    }
+    let Some(model) = name.split("rtx ").nth(1) else {
+        return false;
+    };
+    let digits = model
+        .chars()
+        .take_while(char::is_ascii_digit)
+        .collect::<String>();
+    digits.len() >= 4 && digits.starts_with("50")
+}
+
+fn sensor_label(sensor: &SensorReading, info: &SysInfo, language: Language) -> String {
+    if metadata(sensor).kind == SensorKind::HotspotTemperature
+        && is_geforce_rtx_50_series(info.gpu_name.as_deref())
+    {
+        format!("{} ({})", sensor.name, language.text(Key::Beta))
+    } else {
+        sensor.name.clone()
+    }
+}
+
 fn group_title(group: SensorGroup, language: Language) -> &'static str {
     match group {
         SensorGroup::Gpu => "GPU",
@@ -319,7 +346,8 @@ pub fn draw_dashboard(
                 accent(),
             );
         }
-        clipped(hdc, LIST_LEFT + 20, y + 2, &sensor.name, LABEL, 310);
+        let label = sensor_label(sensor, info, language);
+        clipped(hdc, LIST_LEFT + 20, y + 2, &label, LABEL, 310);
         let previous = unsafe { SelectObject(hdc, bold_font) };
         let value = sensor_value(sensor);
         let value_x = list_right - 20 - text_width(hdc, &value);
@@ -388,7 +416,7 @@ fn draw_selected_panel(
         hdc,
         left + 16,
         top + 54,
-        &sensor.name,
+        &sensor_label(sensor, info, language),
         VALUE,
         right - left - 32,
     );
@@ -708,6 +736,47 @@ mod tests {
                 .filter(|sensor| metadata(sensor).kind == SensorKind::PerfCap)
                 .count(),
             1
+        );
+    }
+
+    #[test]
+    fn rtx_50_hotspot_uses_a_localized_beta_label_without_changing_sensor_id() {
+        let mut snapshot = info(&[("GPU Hot Spot", 72.0, "°C")]);
+        snapshot.gpu_name = Some("NVIDIA GeForce RTX 5050".to_owned());
+        let hotspot = ordered_sensors(&snapshot)
+            .into_iter()
+            .next()
+            .expect("visible HotSpot");
+
+        assert_eq!(
+            sensor_label(&hotspot, &snapshot, Language::English),
+            "GPU Hot Spot (BETA)"
+        );
+        assert_eq!(
+            sensor_label(&hotspot, &snapshot, Language::Russian),
+            "GPU Hot Spot (БЕТА)"
+        );
+        assert_eq!(
+            sensor_id(&hotspot),
+            sensor_id(&SensorReading {
+                name: "GPU Hot Spot".to_owned(),
+                value: hotspot.value,
+                unit: hotspot.unit.clone(),
+            })
+        );
+    }
+
+    #[test]
+    fn beta_label_is_not_applied_to_non_rtx_50_hotspots() {
+        let snapshot = info(&[("GPU Hot Spot", 72.0, "°C")]);
+        let hotspot = ordered_sensors(&snapshot)
+            .into_iter()
+            .next()
+            .expect("visible HotSpot");
+
+        assert_eq!(
+            sensor_label(&hotspot, &snapshot, Language::English),
+            "GPU Hot Spot"
         );
     }
 

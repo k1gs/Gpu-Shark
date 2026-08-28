@@ -56,6 +56,7 @@ impl Language {
             }
             (Self::Russian, Key::Back) => "НАЗАД",
             (Self::Russian, Key::Settings) => "НАСТРОЙКИ",
+            (Self::Russian, Key::Beta) => "БЕТА",
             (Self::Russian, Key::UnknownGpu) => {
                 "Неизвестная видеокарта — отправьте отчёт через обратную связь."
             }
@@ -93,6 +94,7 @@ impl Language {
             (Self::English, Key::PerfCapNoGraph) => "Categorical state without a numeric graph.",
             (Self::English, Key::Back) => "BACK",
             (Self::English, Key::Settings) => "SETTINGS",
+            (Self::English, Key::Beta) => "BETA",
             (Self::English, Key::UnknownGpu) => "Unknown GPU — send a report through feedback.",
             (Self::English, Key::Unavailable) => "TELEMETRY UNAVAILABLE",
         }
@@ -241,6 +243,7 @@ pub enum Key {
     PerfCapNoGraph,
     Back,
     Settings,
+    Beta,
     UnknownGpu,
     Unavailable,
 }

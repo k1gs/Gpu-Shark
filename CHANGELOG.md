@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.4-beta.1
+
+- Added beta HotSpot support for the exact desktop GeForce RTX 5050
+  10DE:2D83 profile after independent same-board validation.
+- Marked displayed HotSpot rows on GeForce RTX 50-series cards as BETA;
+  unavailable values remain unavailable.
+- Documented the evidence-gated RTX 50 beta scope in the English and Russian
+  README files and the support matrix.
+
 ## 0.2.3
 
 - Fixed the feedback form so localized labels no longer overlap its input
