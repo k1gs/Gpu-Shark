@@ -19,8 +19,8 @@
 > GPU Shark is strictly read-only. It does not change clocks, voltage, firmware
 > or fan control, and it does not install a kernel driver.
 
-GPU Shark is a lightweight Win32 application with no browser engine, no
-heavyweight GUI framework and no silent background telemetry. It shows only
+GPU Shark is a lightweight Win32 application with no heavyweight GUI framework
+and no silent background network telemetry. It shows only
 measurements that the hardware and driver actually expose; unavailable sensors
 stay hidden instead of being replaced with guessed values.[^sensor-availability]
 
@@ -31,8 +31,7 @@ stay hidden instead of being replaced with guessed values.[^sensor-availability]
 | Native and lightweight | Honest telemetry | Useful during a test |
 |---|---|---|
 | Fast Win32 interface and a portable official single EXE | Core, HotSpot and VRAM are never substituted for one another | Live history, session maximums and GPU-Z-compatible PerfCap reasons |
-| Flicker-free one-second dashboard with configurable refresh interval | Exact enhanced thermal mappings are enabled only for validated PCI profiles | Separate fan, power, voltage, activity and system readings when exposed |
-| English by default, with Russian UI and selectable accent colors | Missing or unsupported measurements are hidden | Consent-based feedback for unknown cards and provider failures |
+| Compact live sensor dashboard | Exact enhanced thermal mappings are enabled only for validated PCI profiles | Separate fan, power, voltage, activity and system readings when exposed |
 
 ### Highlights
 
@@ -72,8 +71,9 @@ profile.[^sensor-availability]
 
 > [!WARNING]
 > GeForce RTX 50-series HotSpot support is **beta**. The current verified
-> enhanced profile is the desktop GeForce RTX 5050 (10DE:2D83); other RTX 50
-> cards remain conservative until their exact hardware profiles are validated.
+> enhanced native fallback profile is the desktop GeForce RTX 5050 (10DE:2D83);
+> other RTX 50 cards use the conservative provider path until their exact
+> hardware profiles are validated.
 > GPU Shark marks any displayed RTX 50 HotSpot row as <code>BETA</code>. The
 > label does not manufacture a missing reading.
 
@@ -88,8 +88,8 @@ profile.[^sensor-availability]
 | GeForce RTX 4060 | Yes | Validated | Board-dependent | Validated |
 | GeForce RTX 4090 | Yes | Validated | Under validation | HotSpot validated |
 | GeForce RTX 5050 | Yes | Beta[^rtx50] | Validated | Exact desktop profile |
-| GeForce RTX 5070 | Yes | In progress[^rtx50] | Yes on tested board | Experimental |
-| GeForce RTX 5070 Ti | Yes | In progress[^rtx50] | Yes on tested board | Experimental |
+| GeForce RTX 5070 | Yes | Beta[^rtx50] | Yes on tested board | Experimental |
+| GeForce RTX 5070 Ti | Yes | Beta[^rtx50] | Yes on tested board | Experimental |
 | Other NVIDIA GPUs | Usually | Driver/board-dependent | Driver/board-dependent | Conservative fallback |
 
 See [SUPPORTED_GPUS.md](SUPPORTED_GPUS.md) for the user-facing support matrix.
@@ -265,9 +265,11 @@ Bug reports are welcome through [GitHub Issues](https://github.com/k1gs/Gpu-Shar
     partners, driver versions and firmware. A listed GPU model does not imply
     that every board exposes every measurement.
 [^rtx50]: RTX 50 HotSpot support is beta and evidence-gated. The desktop RTX
-    5050 10DE:2D83 profile has an independently validated HotSpot path; other
-    RTX 50 cards remain unavailable until they have their own exact same-board
-    evidence. Core or VRAM will never be relabeled as HotSpot.
+    5050 10DE:2D83 profile has an independently validated native HotSpot
+    fallback. Other RTX 50 cards do not receive a native HotSpot fallback
+    until they have their own exact same-board evidence. If the regular
+    provider exposes a HotSpot reading, GPU Shark displays it and marks the
+    row <code>BETA</code>. Core or VRAM will never be relabeled as HotSpot.
 [^stress-test]: Any future stress test must be explicitly started by the user
     and remain isolated from clocks, voltage, firmware and fan-control paths.
 [^official-build]: Public source can build and audit the GUI and reproduce the
