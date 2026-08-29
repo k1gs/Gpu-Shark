@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![GPU Shark cover](GH_COVER.png)
+![GPU Shark cover](materials/GH_COVER.png)
 
 [![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?logo=windows)](https://github.com/k1gs/Gpu-Shark/releases)
 [![Latest release](https://img.shields.io/github/v/release/k1gs/Gpu-Shark?display_name=tag)](https://github.com/k1gs/Gpu-Shark/releases/latest)
@@ -24,7 +24,7 @@ heavyweight GUI framework and no silent background telemetry. It shows only
 measurements that the hardware and driver actually expose; unavailable sensors
 stay hidden instead of being replaced with guessed values.[^sensor-availability]
 
-![GPU Shark sensor dashboard](Screen.png)
+![GPU Shark sensor dashboard](materials/213.png)
 
 ## At a glance
 
@@ -48,6 +48,15 @@ stay hidden instead of being replaced with guessed values.[^sensor-availability]
 - Localized About view with the project logo and application version
 - Consent-based feedback form with no automatic submission
 - Fixed landscape layout with flicker-free double-buffered drawing
+
+### Native interface
+
+<div align="center">
+  <img src="materials/Screenshot1.png" alt="GPU Shark interface view" width="49%" />
+</div>
+
+The interface keeps the live readings, settings, About information and
+consent-based feedback in one compact native Win32 application.
 
 > [!NOTE]
 > GPU Shark never invents a HotSpot value from Core, Memory or an unrelated
