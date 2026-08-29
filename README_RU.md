@@ -49,7 +49,7 @@ GPU Shark — лёгкое Win32-приложение без браузерно�
 ### Нативный интерфейс
 
 <div align="center">
-  <img src="materials/Screenshot1.png" alt="Окно GPU Shark" width="49%" />
+  <img src="materials/Screenshot1.png" alt="Окно GPU Shark" width="100%" />
 </div>
 
 Показания, настройки, сведения о программе и отправка обратной связи с
