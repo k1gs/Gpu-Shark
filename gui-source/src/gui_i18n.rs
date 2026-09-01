@@ -29,6 +29,10 @@ impl Language {
             (Self::Russian, Key::Reset) => "СБРОС",
             (Self::Russian, Key::Max) => "МАКС",
             (Self::Russian, Key::Min) => "МИН",
+            (Self::Russian, Key::Theme) => "Тема",
+            (Self::Russian, Key::Light) => "Светлая",
+            (Self::Russian, Key::Dark) => "Тёмная",
+            (Self::Russian, Key::ShowingMaximum) => "ПОКАЗАН МАКСИМУМ",
             (Self::Russian, Key::Feedback) => "ОБРАТНАЯ СВЯЗЬ",
             (Self::Russian, Key::FeedbackPrivacy) => {
                 "В отчёт попадут только название GPU, публичные датчики и введённый вами текст."
@@ -71,6 +75,10 @@ impl Language {
             (Self::English, Key::Reset) => "RESET",
             (Self::English, Key::Max) => "MAX",
             (Self::English, Key::Min) => "MIN",
+            (Self::English, Key::Theme) => "Theme",
+            (Self::English, Key::Light) => "Light",
+            (Self::English, Key::Dark) => "Dark",
+            (Self::English, Key::ShowingMaximum) => "SHOWING MAXIMUM",
             (Self::English, Key::Feedback) => "FEEDBACK",
             (Self::English, Key::FeedbackPrivacy) => {
                 "The report includes only the GPU name, public sensors, and the text you enter."
@@ -216,6 +224,7 @@ mod tests {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Copy)]
 pub enum Key {
     Sensors,
@@ -228,6 +237,10 @@ pub enum Key {
     Reset,
     Max,
     Min,
+    Theme,
+    Light,
+    Dark,
+    ShowingMaximum,
     Feedback,
     FeedbackPrivacy,
     FeedbackContact,

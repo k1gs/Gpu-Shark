@@ -31,11 +31,20 @@ pub enum TemperatureUnit {
     Celsius,
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UiTheme {
+    #[default]
+    Light,
+    Dark,
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(default)]
 pub struct AppSettings {
     pub schema_version: u32,
     pub language: UiLanguage,
+    pub theme: UiTheme,
     pub refresh_interval_ms: u64,
     pub accent: AccentTheme,
     pub temperature_unit: TemperatureUnit,
@@ -46,6 +55,7 @@ impl Default for AppSettings {
         Self {
             schema_version: SETTINGS_SCHEMA_VERSION,
             language: UiLanguage::English,
+            theme: UiTheme::Light,
             refresh_interval_ms: 1_000,
             accent: AccentTheme::Green,
             temperature_unit: TemperatureUnit::Celsius,

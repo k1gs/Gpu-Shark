@@ -1,10 +1,10 @@
 use crate::feedback;
 use crate::gui_i18n::{Key, Language};
 use crate::gui_state::{SensorHistory, SensorStats};
-use crate::sensor_model::{SensorGroup, SensorKind, metadata, sensor_id};
-use crate::settings::{self, AccentTheme, AppSettings, UiLanguage};
+use crate::sensor_model::{SensorKind, metadata, sensor_id};
+use crate::settings::{self, AccentTheme, AppSettings, UiLanguage, UiTheme};
 use eframe::egui::{
-    self, Align, Align2, Color32, FontId, Layout, RichText, Sense, Stroke, TextStyle, Vec2,
+    self, Align, Align2, Color32, FontId, Layout, Rect, RichText, Sense, Stroke, TextStyle, Vec2,
 };
 use gpu_shark::{
     SensorReading, SysInfo, dll_library_path, fetch_data_from_dll, load_driver_library,
@@ -17,15 +17,68 @@ use std::sync::{
 use std::{thread, time::Duration};
 use windows_sys::Win32::Graphics::Dwm::DwmGetColorizationColor;
 
-const BACKGROUND: Color32 = Color32::from_rgb(25, 27, 30);
-const SURFACE: Color32 = Color32::from_rgb(34, 37, 41);
-const RAISED: Color32 = Color32::from_rgb(45, 49, 54);
-const DIVIDER: Color32 = Color32::from_rgb(66, 71, 78);
-const LABEL: Color32 = Color32::from_rgb(194, 198, 204);
-const MUTED: Color32 = Color32::from_rgb(139, 145, 154);
-const VALUE: Color32 = Color32::from_rgb(246, 248, 250);
-const AMBER: Color32 = Color32::from_rgb(246, 197, 68);
-const RED: Color32 = Color32::from_rgb(240, 82, 91);
+const ROW_HEIGHT: f32 = 26.0;
+const SPARK_WIDTH: f32 = 64.0;
+const TABLE_MARGIN: f32 = 10.0;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Tab {
+    Sensors,
+    Settings,
+    Feedback,
+}
+
+#[derive(Clone, Copy)]
+struct Palette {
+    chrome: Color32,
+    background: Color32,
+    hover: Color32,
+    divider: Color32,
+    text: Color32,
+    muted: Color32,
+    value: Color32,
+    graph: Color32,
+    selection: Color32,
+    danger: Color32,
+    warning: Color32,
+    edit_bg: Color32,
+    plot_bg: Color32,
+}
+
+fn palette(theme: UiTheme, accent: Color32) -> Palette {
+    match theme {
+        UiTheme::Light => Palette {
+            chrome: Color32::from_rgb(240, 240, 240),
+            background: Color32::from_rgb(255, 255, 255),
+            hover: Color32::from_rgb(238, 244, 250),
+            divider: Color32::from_rgb(219, 219, 219),
+            text: Color32::from_rgb(26, 26, 26),
+            muted: Color32::from_rgb(128, 128, 128),
+            value: Color32::from_rgb(0, 0, 0),
+            graph: Color32::from_rgb(224, 0, 0),
+            selection: Color32::from_rgb(204, 232, 255),
+            danger: Color32::from_rgb(192, 28, 28),
+            warning: Color32::from_rgb(176, 128, 0),
+            edit_bg: Color32::from_rgb(255, 255, 255),
+            plot_bg: Color32::from_rgb(250, 250, 250),
+        },
+        UiTheme::Dark => Palette {
+            chrome: Color32::from_rgb(25, 27, 30),
+            background: Color32::from_rgb(25, 27, 30),
+            hover: Color32::from_rgb(45, 49, 54),
+            divider: Color32::from_rgb(66, 71, 78),
+            text: Color32::from_rgb(194, 198, 204),
+            muted: Color32::from_rgb(139, 145, 154),
+            value: Color32::from_rgb(246, 248, 250),
+            graph: accent,
+            selection: accent.gamma_multiply(0.20),
+            danger: Color32::from_rgb(240, 82, 91),
+            warning: Color32::from_rgb(246, 197, 68),
+            edit_bg: Color32::from_rgb(27, 30, 33),
+            plot_bg: Color32::from_rgb(22, 24, 27),
+        },
+    }
+}
 
 #[derive(Clone)]
 enum Snapshot {
@@ -79,16 +132,15 @@ impl Drop for TelemetryWorker {
 }
 
 pub struct GpuSharkApp {
+    tab: Tab,
     settings: AppSettings,
     settings_draft: AppSettings,
-    settings_open: bool,
     settings_notice: Option<String>,
     snapshot: Option<Snapshot>,
     telemetry_rx: mpsc::Receiver<Snapshot>,
     refresh_interval: Arc<AtomicU64>,
     _worker: TelemetryWorker,
     history: SensorHistory,
-    feedback_open: bool,
     feedback_note: String,
     feedback_contact: String,
     feedback_consent: bool,
@@ -101,21 +153,20 @@ impl GpuSharkApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let outcome = settings::load();
         let settings = outcome.settings;
-        configure_style(&cc.egui_ctx, accent_color(settings.accent));
+        configure_style(&cc.egui_ctx, settings.theme, accent_color(settings.accent));
         let refresh_interval = Arc::new(AtomicU64::new(settings.refresh_interval_ms));
         let (telemetry_rx, worker) =
             spawn_worker(cc.egui_ctx.clone(), Arc::clone(&refresh_interval));
         Self {
+            tab: Tab::Sensors,
             settings_draft: settings.clone(),
             settings,
-            settings_open: false,
             settings_notice: outcome.warning,
             snapshot: None,
             telemetry_rx,
             refresh_interval,
             _worker: worker,
             history: SensorHistory::default(),
-            feedback_open: false,
             feedback_note: String::new(),
             feedback_contact: String::new(),
             feedback_consent: false,
@@ -133,6 +184,10 @@ impl GpuSharkApp {
         accent_color(self.settings.accent)
     }
 
+    fn palette(&self) -> Palette {
+        palette(self.settings.theme, self.accent())
+    }
+
     fn drain_updates(&mut self) {
         while let Ok(snapshot) = self.telemetry_rx.try_recv() {
             if let Snapshot::Data(info) = &snapshot {
@@ -148,158 +203,203 @@ impl GpuSharkApp {
         }
     }
 
-    fn header(&mut self, ui: &mut egui::Ui) {
-        let language = self.language();
-        let accent = self.accent();
-        let name = match &self.snapshot {
-            Some(Snapshot::Data(info)) => info.gpu_name.as_deref().unwrap_or("Unknown GPU"),
-            _ => "GPU Shark",
-        };
-        let available = ui.available_width();
+    fn tab_bar(&mut self, ui: &mut egui::Ui) {
+        let p = self.palette();
+        ui.set_min_height(34.0);
         ui.horizontal(|ui| {
-            ui.allocate_ui_with_layout(
-                Vec2::new((available - 270.0).max(300.0), 76.0),
-                Layout::top_down(Align::LEFT),
-                |ui| {
-                    ui.label(RichText::new("GPU SHARK").size(18.0).strong().color(accent));
-                    ui.add(
-                        egui::Label::new(RichText::new(name).size(17.0).strong().color(VALUE))
-                            .truncate(),
-                    )
-                    .on_hover_text(name);
-                    ui.label(
-                        RichText::new(language.refresh_hint(self.settings.refresh_interval_ms))
-                            .size(12.5)
-                            .color(MUTED),
-                    );
-                },
+            ui.add_space(6.0);
+            ui.label(
+                RichText::new("GPU SHARK")
+                    .size(10.5)
+                    .strong()
+                    .color(p.muted),
             );
-            ui.allocate_ui_with_layout(
-                Vec2::new(260.0, 76.0),
-                Layout::right_to_left(Align::TOP),
-                |ui| {
-                    if ui
-                        .add(header_button(language.text(Key::Feedback), accent))
-                        .clicked()
-                    {
-                        self.feedback_open = true;
-                    }
-                    if ui
-                        .add(header_button(language.text(Key::Settings), accent))
-                        .clicked()
-                    {
-                        self.settings_draft = self.settings.clone();
-                        self.settings_open = true;
-                    }
-                },
-            );
+            ui.add_space(14.0);
+            for (tab, key) in [
+                (Tab::Sensors, Key::Sensors),
+                (Tab::Settings, Key::Settings),
+                (Tab::Feedback, Key::Feedback),
+            ] {
+                let active = self.tab == tab;
+                let text = RichText::new(self.language().text(key))
+                    .size(12.5)
+                    .strong()
+                    .color(if active { p.text } else { p.muted });
+                let button = egui::Button::new(text)
+                    .min_size(Vec2::new(0.0, 26.0))
+                    .fill(if active {
+                        p.background
+                    } else {
+                        Color32::TRANSPARENT
+                    })
+                    .stroke(if active {
+                        Stroke::new(1.0, p.divider)
+                    } else {
+                        Stroke::NONE
+                    })
+                    .corner_radius(0.0);
+                if ui.add(button).clicked() {
+                    self.tab = tab;
+                }
+            }
         });
-        if matches!(&self.snapshot, Some(Snapshot::Data(info)) if info.gpu_name.is_none()) {
-            ui.label(RichText::new(language.text(Key::UnknownGpu)).color(AMBER));
-        }
-        if let Some(notice) = self.settings_notice.clone() {
-            ui.horizontal(|ui| {
-                ui.label(RichText::new(notice).color(AMBER));
-                if ui.small_button("?").clicked() {
-                    self.settings_notice = None;
-                }
-            });
-        }
+        ui.add_space(2.0);
     }
 
-    fn dashboard(&mut self, ui: &mut egui::Ui, info: &SysInfo) {
-        let sensors = ordered_sensors(info);
-        let height = ui.available_height().max(420.0);
-        ui.columns(2, |columns| {
-            card(&mut columns[0], height, |ui| {
-                heading(ui, self.language().text(Key::Sensors), self.accent());
-                ui.separator();
-                self.sensor_list(ui, &sensors);
-            });
-            card(&mut columns[1], height, |ui| {
-                heading(ui, self.language().text(Key::Selected), self.accent());
-                ui.separator();
-                self.selected_panel(ui, &sensors);
-            });
-        });
-    }
-
-    fn sensor_list(&mut self, ui: &mut egui::Ui, sensors: &[SensorReading]) {
-        let language = self.language();
-        let accent = self.accent();
-        egui::ScrollArea::vertical()
-            .id_salt("sensor-list")
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                let mut previous_group = None;
-                for sensor in sensors {
-                    let item = metadata(sensor);
-                    if previous_group != Some(item.group) {
-                        if previous_group.is_some() {
-                            ui.add_space(8.0);
-                        }
-                        ui.label(
-                            RichText::new(group_title(item.group, language))
-                                .size(11.5)
-                                .strong()
-                                .color(MUTED),
-                        );
-                        previous_group = Some(item.group);
-                    }
-                    let selected = self.history.selected_id().is_some_and(|id| *id == item.id);
-                    let response = sensor_row(ui, sensor, selected, accent)
-                        .on_hover_text(sensor_tooltip(item.kind, language));
-                    if response.double_clicked() {
-                        self.history.select_maximum(sensor);
-                    } else if response.clicked() {
-                        self.history.select(sensor);
-                    }
+    fn sensors_tab(&mut self, ui: &mut egui::Ui) {
+        let Some(Snapshot::Data(info)) = self.snapshot.clone() else {
+            let message = match &self.snapshot {
+                Some(Snapshot::LoadFailed(error)) => {
+                    format!("Could not load {}: {error}", dll_library_path())
                 }
-                if sensors.is_empty() {
-                    ui.label(RichText::new(language.text(Key::Unavailable)).color(MUTED));
-                }
-            });
-    }
-
-    fn selected_panel(&mut self, ui: &mut egui::Ui, sensors: &[SensorReading]) {
-        let language = self.language();
-        let accent = self.accent();
-        let selected = self
-            .history
-            .selected_id()
-            .and_then(|id| sensors.iter().find(|sensor| sensor_id(sensor) == *id));
-        let Some(sensor) = selected else {
-            ui.add_space(38.0);
-            ui.heading(language.text(Key::ChooseSensor));
-            ui.label(RichText::new(language.text(Key::ChooseSensorHint)).color(MUTED));
+                Some(Snapshot::FetchError(error)) => error.clone(),
+                _ => connect_message(self.settings.language),
+            };
+            self.unavailable(ui, &message);
             return;
         };
+        let sensors = ordered_sensors(&info);
+        let detail_open = self
+            .history
+            .selected_id()
+            .is_some_and(|selected| sensors.iter().any(|sensor| sensor_id(sensor) == *selected));
+        let detail_height = if detail_open { 198.0 } else { 0.0 };
+        let width = ui.available_width();
+        let table_height = (ui.available_height() - 48.0 - detail_height).max(160.0);
+        ui.allocate_ui(Vec2::new(width, table_height), |ui| {
+            egui::ScrollArea::vertical()
+                .id_salt("sensor-table")
+                .auto_shrink([false, false])
+                .show(ui, |ui| self.sensor_table(ui, &sensors));
+        });
+        if detail_open {
+            self.detail_panel(ui, &sensors);
+        }
+        ui.add_space(6.0);
+        ui.separator();
+        self.sensors_bottom_bar(ui, &info);
+    }
+
+    fn sensor_table(&mut self, ui: &mut egui::Ui, sensors: &[SensorReading]) {
+        let p = self.palette();
+        let width = ui.available_width();
+        for sensor in sensors {
+            let item = metadata(sensor);
+            let id = item.id.clone();
+            let selected = self.history.selected_id() == Some(&id);
+            let tracked = selected && self.history.shows_maximum();
+            let (rect, response) =
+                ui.allocate_exact_size(Vec2::new(width, ROW_HEIGHT), Sense::click());
+            let fill = if selected {
+                p.selection
+            } else if response.hovered() {
+                p.hover
+            } else {
+                Color32::TRANSPARENT
+            };
+            let font = TextStyle::Body.resolve(ui.style());
+            let painter = ui.painter();
+            painter.rect_filled(rect, 0.0, fill);
+            painter.line_segment(
+                [rect.left_bottom(), rect.right_bottom()],
+                Stroke::new(1.0, p.divider.gamma_multiply(0.7)),
+            );
+            let name_x = rect.left() + TABLE_MARGIN + if tracked { 38.0 } else { 0.0 };
+            painter.text(
+                egui::pos2(name_x, rect.center().y),
+                Align2::LEFT_CENTER,
+                &sensor.name,
+                font.clone(),
+                p.text,
+            );
+            if tracked {
+                painter.text(
+                    egui::pos2(rect.left() + 6.0, rect.center().y),
+                    Align2::LEFT_CENTER,
+                    "MAX",
+                    FontId::monospace(9.0),
+                    p.graph,
+                );
+            }
+            painter.text(
+                egui::pos2(rect.right() - SPARK_WIDTH - 22.0, rect.center().y),
+                Align2::RIGHT_CENTER,
+                sensor_value(sensor),
+                font,
+                if tracked {
+                    p.graph
+                } else {
+                    sensor_color(sensor, p)
+                },
+            );
+            if item.graphable {
+                let spark = Rect::from_min_size(
+                    egui::pos2(rect.right() - SPARK_WIDTH - 8.0, rect.center().y - 9.0),
+                    Vec2::new(SPARK_WIDTH, 18.0),
+                );
+                let samples = self.history.row_samples(&id);
+                sparkline(painter, spark, &samples, p.graph);
+            }
+            if response.double_clicked() {
+                self.history.select_maximum(sensor);
+            } else if response.clicked() {
+                if selected {
+                    self.history.clear_selection();
+                } else {
+                    self.history.select(sensor);
+                }
+            }
+            let _ = response.on_hover_text(sensor_tooltip(item.kind, self.language()));
+        }
+        if sensors.is_empty() {
+            ui.label(
+                RichText::new(self.language().text(Key::Unavailable)).color(self.palette().muted),
+            );
+        }
+    }
+
+    fn detail_panel(&mut self, ui: &mut egui::Ui, sensors: &[SensorReading]) {
+        let p = self.palette();
+        let language = self.language();
+        let Some(selected_id) = self.history.selected_id().cloned() else {
+            return;
+        };
+        let Some(sensor) = sensors
+            .iter()
+            .find(|sensor| sensor_id(sensor) == selected_id)
+        else {
+            return;
+        };
+        ui.add_space(8.0);
         ui.horizontal(|ui| {
             ui.vertical(|ui| {
-                ui.label(RichText::new(&sensor.name).size(18.0).strong().color(VALUE));
+                ui.label(
+                    RichText::new(&sensor.name)
+                        .size(15.0)
+                        .strong()
+                        .color(p.text),
+                );
                 ui.label(
                     RichText::new(sensor_value(sensor))
-                        .size(28.0)
+                        .size(22.0)
                         .strong()
-                        .color(sensor_color(sensor)),
+                        .color(sensor_color(sensor, p)),
                 );
             });
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if metadata(sensor).graphable && ui.button(language.text(Key::Reset)).clicked() {
-                    self.history.reset();
+                if self.history.shows_maximum() {
+                    ui.label(
+                        RichText::new(language.text(Key::ShowingMaximum))
+                            .size(10.5)
+                            .strong()
+                            .color(p.graph),
+                    );
                 }
             });
         });
-        ui.add_space(8.0);
         if metadata(sensor).kind == SensorKind::PerfCap {
-            egui::Frame::new()
-                .fill(RAISED)
-                .corner_radius(8.0)
-                .inner_margin(14.0)
-                .show(ui, |ui| {
-                    ui.label(RichText::new(language.text(Key::PerfCapDetail)).color(LABEL));
-                    ui.label(RichText::new(language.text(Key::PerfCapNoGraph)).color(MUTED));
-                });
+            ui.label(RichText::new(language.text(Key::PerfCapDetail)).color(p.text));
+            ui.label(RichText::new(language.text(Key::PerfCapNoGraph)).color(p.muted));
             return;
         }
         let stats = self.history.stats().unwrap_or(SensorStats {
@@ -308,192 +408,219 @@ impl GpuSharkApp {
             max: sensor.value,
         });
         ui.horizontal(|ui| {
-            metric_chip(ui, language.text(Key::Min), stats.min, &sensor.unit, MUTED);
-            metric_chip(ui, language.text(Key::Max), stats.max, &sensor.unit, accent);
-            if self.history.shows_maximum() {
-                let text = if matches!(language, Language::Russian) {
-                    "ПОКАЗАН МАКСИМУМ"
-                } else {
-                    "SHOWING MAXIMUM"
-                };
-                ui.label(RichText::new(text).size(10.5).strong().color(accent));
-            }
-        });
-        ui.label(
-            RichText::new(language.text(Key::History))
-                .size(11.5)
-                .strong()
-                .color(MUTED),
-        );
-        graph(ui, &self.history.samples(), stats, accent);
-    }
-
-    fn unavailable(&self, ui: &mut egui::Ui, detail: &str) {
-        card(ui, ui.available_height().max(320.0), |ui| {
-            ui.add_space(32.0);
-            ui.label(
-                RichText::new(self.language().text(Key::Unavailable))
-                    .size(18.0)
-                    .strong()
-                    .color(RED),
+            metric_chip(
+                ui,
+                language.text(Key::Min),
+                stats.min,
+                &sensor.unit,
+                p.muted,
             );
-            ui.add_space(12.0);
-            ui.label(RichText::new(detail).color(LABEL));
+            metric_chip(
+                ui,
+                language.text(Key::Max),
+                stats.max,
+                &sensor.unit,
+                p.graph,
+            );
+        });
+        graph(ui, &self.history.samples(), stats, p);
+    }
+
+    fn sensors_bottom_bar(&mut self, ui: &mut egui::Ui, info: &SysInfo) {
+        let p = self.palette();
+        let language = self.language();
+        ui.horizontal(|ui| {
+            let name = info.gpu_name.as_deref().unwrap_or("Unknown GPU");
+            let response = ui.label(RichText::new(name).size(12.5).color(
+                if info.gpu_name.is_none() {
+                    p.warning
+                } else {
+                    p.text
+                },
+            ));
+            if info.gpu_name.is_none() {
+                response.on_hover_text(language.text(Key::UnknownGpu));
+            }
+            ui.label(
+                RichText::new(language.refresh_hint(self.settings.refresh_interval_ms))
+                    .size(11.0)
+                    .color(p.muted),
+            );
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if ui.button(language.text(Key::Reset)).clicked() {
+                    self.history.reset();
+                }
+            });
         });
     }
 
-    fn settings_window(&mut self, ctx: &egui::Context) {
-        if !self.settings_open {
-            return;
-        }
+    fn settings_tab(&mut self, ui: &mut egui::Ui) {
         let language = self.language();
-        let mut open = self.settings_open;
+        let p = self.palette();
+        let ctx = ui.ctx().clone();
         let mut apply = false;
         let mut restore = false;
-        let title = if matches!(language, Language::Russian) {
-            "Настройки GPU Shark"
-        } else {
-            "GPU Shark Settings"
-        };
-        egui::Window::new(title)
-            .open(&mut open)
-            .collapsible(false)
-            .resizable(false)
-            .default_width(460.0)
-            .show(ctx, |ui| {
-                egui::Grid::new("settings-grid")
-                    .num_columns(2)
-                    .spacing([24.0, 14.0])
-                    .show(ui, |ui| {
-                        ui.label(if matches!(language, Language::Russian) {
-                            "Язык интерфейса"
-                        } else {
-                            "Interface language"
-                        });
-                        egui::ComboBox::from_id_salt("language")
-                            .selected_text(match self.settings_draft.language {
-                                UiLanguage::English => "English",
-                                UiLanguage::Russian => "Русский",
-                            })
-                            .show_ui(ui, |ui| {
-                                ui.selectable_value(
-                                    &mut self.settings_draft.language,
-                                    UiLanguage::English,
-                                    "English",
-                                );
-                                ui.selectable_value(
-                                    &mut self.settings_draft.language,
-                                    UiLanguage::Russian,
-                                    "Русский",
-                                );
-                            });
-                        ui.end_row();
-                        ui.label(if matches!(language, Language::Russian) {
-                            "Частота обновления"
-                        } else {
-                            "Refresh interval"
-                        });
-                        egui::ComboBox::from_id_salt("refresh")
-                            .selected_text(refresh_label(self.settings_draft.refresh_interval_ms))
-                            .show_ui(ui, |ui| {
-                                ui.selectable_value(
-                                    &mut self.settings_draft.refresh_interval_ms,
-                                    500,
-                                    "500 ms",
-                                );
-                                ui.selectable_value(
-                                    &mut self.settings_draft.refresh_interval_ms,
-                                    1_000,
-                                    "1 s",
-                                );
-                                ui.selectable_value(
-                                    &mut self.settings_draft.refresh_interval_ms,
-                                    2_000,
-                                    "2 s",
-                                );
-                            });
-                        ui.end_row();
-                        ui.label(if matches!(language, Language::Russian) {
-                            "Акцентный цвет"
-                        } else {
-                            "Accent color"
-                        });
-                        egui::ComboBox::from_id_salt("accent")
-                            .selected_text(accent_label(self.settings_draft.accent))
-                            .show_ui(ui, |ui| {
-                                for theme in [
-                                    AccentTheme::Green,
-                                    AccentTheme::Blue,
-                                    AccentTheme::Purple,
-                                    AccentTheme::Orange,
-                                    AccentTheme::Windows,
-                                ] {
-                                    ui.selectable_value(
-                                        &mut self.settings_draft.accent,
-                                        theme,
-                                        accent_label(theme),
-                                    );
-                                }
-                            });
-                        ui.end_row();
-                        ui.label(if matches!(language, Language::Russian) {
-                            "Температура"
-                        } else {
-                            "Temperature"
-                        });
-                        ui.add_enabled(
-                            false,
-                            egui::Button::new(if matches!(language, Language::Russian) {
-                                "Цельсий"
-                            } else {
-                                "Celsius"
-                            }),
-                        );
-                        ui.end_row();
+        let mut cancel = false;
+        ui.add_space(14.0);
+        ui.allocate_ui(Vec2::new(470.0, ui.available_height()), |ui| {
+            if let Some(notice) = self.settings_notice.clone() {
+                ui.label(RichText::new(notice).color(p.warning));
+                ui.add_space(8.0);
+            }
+            egui::Grid::new("settings-grid")
+                .num_columns(2)
+                .spacing([24.0, 14.0])
+                .show(ui, |ui| {
+                    ui.label(if matches!(language, Language::Russian) {
+                        "Язык интерфейса"
+                    } else {
+                        "Interface language"
                     });
-                ui.add_space(16.0);
-                ui.separator();
-                ui.horizontal(|ui| {
+                    egui::ComboBox::from_id_salt("language")
+                        .selected_text(match self.settings_draft.language {
+                            UiLanguage::English => "English",
+                            UiLanguage::Russian => "Русский",
+                        })
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(
+                                &mut self.settings_draft.language,
+                                UiLanguage::English,
+                                "English",
+                            );
+                            ui.selectable_value(
+                                &mut self.settings_draft.language,
+                                UiLanguage::Russian,
+                                "Русский",
+                            );
+                        });
+                    ui.end_row();
+                    ui.label(language.text(Key::Theme));
+                    egui::ComboBox::from_id_salt("theme")
+                        .selected_text(match self.settings_draft.theme {
+                            UiTheme::Light => language.text(Key::Light),
+                            UiTheme::Dark => language.text(Key::Dark),
+                        })
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(
+                                &mut self.settings_draft.theme,
+                                UiTheme::Light,
+                                language.text(Key::Light),
+                            );
+                            ui.selectable_value(
+                                &mut self.settings_draft.theme,
+                                UiTheme::Dark,
+                                language.text(Key::Dark),
+                            );
+                        });
+                    ui.end_row();
+                    ui.label(if matches!(language, Language::Russian) {
+                        "Частота обновления"
+                    } else {
+                        "Refresh interval"
+                    });
+                    egui::ComboBox::from_id_salt("refresh")
+                        .selected_text(refresh_label(self.settings_draft.refresh_interval_ms))
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(
+                                &mut self.settings_draft.refresh_interval_ms,
+                                500,
+                                "500 ms",
+                            );
+                            ui.selectable_value(
+                                &mut self.settings_draft.refresh_interval_ms,
+                                1_000,
+                                "1 s",
+                            );
+                            ui.selectable_value(
+                                &mut self.settings_draft.refresh_interval_ms,
+                                2_000,
+                                "2 s",
+                            );
+                        });
+                    ui.end_row();
+                    ui.label(if matches!(language, Language::Russian) {
+                        "Акцентный цвет"
+                    } else {
+                        "Accent color"
+                    });
+                    egui::ComboBox::from_id_salt("accent")
+                        .selected_text(accent_label(self.settings_draft.accent))
+                        .show_ui(ui, |ui| {
+                            for theme in [
+                                AccentTheme::Green,
+                                AccentTheme::Blue,
+                                AccentTheme::Purple,
+                                AccentTheme::Orange,
+                                AccentTheme::Windows,
+                            ] {
+                                ui.selectable_value(
+                                    &mut self.settings_draft.accent,
+                                    theme,
+                                    accent_label(theme),
+                                );
+                            }
+                        });
+                    ui.end_row();
+                    ui.label(if matches!(language, Language::Russian) {
+                        "Температура"
+                    } else {
+                        "Temperature"
+                    });
+                    ui.add_enabled(
+                        false,
+                        egui::Button::new(if matches!(language, Language::Russian) {
+                            "Цельсий"
+                        } else {
+                            "Celsius"
+                        }),
+                    );
+                    ui.end_row();
+                });
+            ui.add_space(16.0);
+            ui.separator();
+            ui.horizontal(|ui| {
+                if ui
+                    .button(if matches!(language, Language::Russian) {
+                        "Восстановить значения"
+                    } else {
+                        "Restore defaults"
+                    })
+                    .clicked()
+                {
+                    restore = true;
+                }
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if ui
+                        .add(
+                            egui::Button::new(if matches!(language, Language::Russian) {
+                                "Применить"
+                            } else {
+                                "Apply"
+                            })
+                            .fill(accent_color(self.settings_draft.accent)),
+                        )
+                        .clicked()
+                    {
+                        apply = true;
+                    }
                     if ui
                         .button(if matches!(language, Language::Russian) {
-                            "Восстановить значения"
+                            "Отмена"
                         } else {
-                            "Restore defaults"
+                            "Cancel"
                         })
                         .clicked()
                     {
-                        restore = true;
+                        cancel = true;
                     }
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if ui
-                            .add(
-                                egui::Button::new(if matches!(language, Language::Russian) {
-                                    "Применить"
-                                } else {
-                                    "Apply"
-                                })
-                                .fill(accent_color(self.settings_draft.accent)),
-                            )
-                            .clicked()
-                        {
-                            apply = true;
-                        }
-                        if ui
-                            .button(if matches!(language, Language::Russian) {
-                                "Отмена"
-                            } else {
-                                "Cancel"
-                            })
-                            .clicked()
-                        {
-                            self.settings_draft = self.settings.clone();
-                            open = false;
-                        }
-                    });
                 });
             });
+        });
         if restore {
             self.settings_draft = AppSettings::default();
+        }
+        if cancel {
+            self.settings_draft = self.settings.clone();
         }
         if apply {
             match settings::save(&self.settings_draft) {
@@ -501,89 +628,96 @@ impl GpuSharkApp {
                     self.settings = self.settings_draft.clone();
                     self.refresh_interval
                         .store(self.settings.refresh_interval_ms, Ordering::Release);
-                    configure_style(ctx, self.accent());
+                    configure_style(&ctx, self.settings.theme, self.accent());
                     self.settings_notice = None;
-                    open = false;
                 }
                 Err(error) => self.settings_notice = Some(error),
             }
         }
-        self.settings_open = open;
     }
 
-    fn feedback_window(&mut self, ctx: &egui::Context) {
-        if !self.feedback_open {
-            return;
-        }
+    fn feedback_tab(&mut self, ui: &mut egui::Ui) {
         let language = self.language();
-        let accent = self.accent();
-        let mut open = self.feedback_open;
+        let p = self.palette();
         let mut submit = false;
-        egui::Window::new(language.text(Key::Feedback))
-            .open(&mut open)
-            .collapsible(false)
-            .resizable(true)
-            .default_width(620.0)
-            .min_width(480.0)
-            .show(ctx, |ui| {
-                ui.label(RichText::new(language.text(Key::FeedbackPrivacy)).color(LABEL));
-                ui.add_space(10.0);
-                ui.label(language.text(Key::FeedbackContact));
-                ui.add(
-                    egui::TextEdit::singleline(&mut self.feedback_contact)
-                        .hint_text(if matches!(language, Language::Russian) {
-                            "Email или другой контакт"
-                        } else {
-                            "Email or another contact"
-                        })
-                        .char_limit(500),
-                );
-                ui.label(language.text(Key::FeedbackDescription));
-                ui.add(
-                    egui::TextEdit::multiline(&mut self.feedback_note)
-                        .desired_rows(7)
-                        .lock_focus(true)
-                        .char_limit(8_000),
-                );
-                ui.checkbox(
-                    &mut self.feedback_consent,
-                    language.text(Key::FeedbackConsent),
-                );
-                ui.add_space(8.0);
-                ui.horizontal(|ui| {
-                    let caption = if self.feedback_sending {
-                        language.text(Key::FeedbackSending)
+        ui.add_space(14.0);
+        ui.allocate_ui(Vec2::new(660.0, ui.available_height()), |ui| {
+            ui.label(RichText::new(language.text(Key::FeedbackPrivacy)).color(p.text));
+            ui.add_space(10.0);
+            ui.label(language.text(Key::FeedbackContact));
+            ui.add(
+                egui::TextEdit::singleline(&mut self.feedback_contact)
+                    .hint_text(if matches!(language, Language::Russian) {
+                        "Email или другой контакт"
                     } else {
-                        language.text(Key::FeedbackSubmit)
-                    };
-                    if ui
-                        .add_enabled(
-                            !self.feedback_sending,
-                            egui::Button::new(caption).fill(if self.feedback_consent {
-                                accent
-                            } else {
-                                RAISED
-                            }),
-                        )
-                        .clicked()
-                    {
-                        submit = true;
-                    }
-                    let status = self.feedback_status.localized(language);
-                    if !status.is_empty() {
-                        let color = if matches!(self.feedback_status, FeedbackStatus::Accepted(_)) {
-                            accent
+                        "Email or another contact"
+                    })
+                    .char_limit(500),
+            );
+            ui.label(language.text(Key::FeedbackDescription));
+            ui.add(
+                egui::TextEdit::multiline(&mut self.feedback_note)
+                    .desired_rows(7)
+                    .lock_focus(true)
+                    .char_limit(8_000),
+            );
+            ui.checkbox(
+                &mut self.feedback_consent,
+                language.text(Key::FeedbackConsent),
+            );
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                let caption = if self.feedback_sending {
+                    language.text(Key::FeedbackSending)
+                } else {
+                    language.text(Key::FeedbackSubmit)
+                };
+                if ui
+                    .add_enabled(
+                        !self.feedback_sending,
+                        egui::Button::new(caption).fill(if self.feedback_consent {
+                            self.accent()
                         } else {
-                            LABEL
-                        };
-                        ui.label(RichText::new(status).color(color));
-                    }
-                });
+                            p.hover
+                        }),
+                    )
+                    .clicked()
+                {
+                    submit = true;
+                }
+                let status = self.feedback_status.localized(language);
+                if !status.is_empty() {
+                    let color = if matches!(self.feedback_status, FeedbackStatus::Accepted(_)) {
+                        self.accent()
+                    } else {
+                        p.text
+                    };
+                    ui.label(RichText::new(status).color(color));
+                }
             });
-        self.feedback_open = open;
+        });
         if submit {
-            self.start_feedback(ctx);
+            let ctx = ui.ctx().clone();
+            self.start_feedback(&ctx);
         }
+    }
+
+    fn unavailable(&self, ui: &mut egui::Ui, detail: &str) {
+        let p = self.palette();
+        ui.add_space(48.0);
+        ui.horizontal(|ui| {
+            ui.add_space(20.0);
+            ui.vertical(|ui| {
+                ui.label(
+                    RichText::new(self.language().text(Key::Unavailable))
+                        .size(17.0)
+                        .strong()
+                        .color(p.danger),
+                );
+                ui.add_space(10.0);
+                ui.label(RichText::new(detail).color(p.text));
+            });
+        });
     }
 
     fn start_feedback(&mut self, ctx: &egui::Context) {
@@ -629,36 +763,37 @@ impl GpuSharkApp {
     }
 }
 
+fn connect_message(language: UiLanguage) -> String {
+    if language == UiLanguage::Russian {
+        "Подключение к локальному источнику телеметрии…".into()
+    } else {
+        "Connecting to the local telemetry provider…".into()
+    }
+}
+
 impl eframe::App for GpuSharkApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.drain_updates();
-        egui::TopBottomPanel::top("header")
+        let p = self.palette();
+        egui::Panel::top("tab-bar")
+            .show_separator_line(false)
             .frame(
                 egui::Frame::new()
-                    .fill(BACKGROUND)
-                    .inner_margin(egui::Margin::symmetric(18, 12)),
+                    .fill(p.chrome)
+                    .inner_margin(egui::Margin::symmetric(10, 4)),
             )
-            .show(ctx, |ui| self.header(ui));
+            .show(ui, |ui| self.tab_bar(ui));
         egui::CentralPanel::default()
-            .frame(egui::Frame::new().fill(BACKGROUND).inner_margin(16.0))
-            .show(ctx, |ui| match self.snapshot.clone() {
-                Some(Snapshot::Data(info)) => self.dashboard(ui, &info),
-                Some(Snapshot::LoadFailed(error)) => self.unavailable(
-                    ui,
-                    &format!("Could not load {}: {error}", dll_library_path()),
-                ),
-                Some(Snapshot::FetchError(error)) => self.unavailable(ui, &error),
-                None => self.unavailable(
-                    ui,
-                    if self.settings.language == UiLanguage::Russian {
-                        "Подключение к локальному источнику телеметрии:"
-                    } else {
-                        "Connecting to the local telemetry provider:"
-                    },
-                ),
+            .frame(
+                egui::Frame::new()
+                    .fill(p.background)
+                    .inner_margin(egui::Margin::symmetric(12, 6)),
+            )
+            .show(ui, |ui| match self.tab {
+                Tab::Sensors => self.sensors_tab(ui),
+                Tab::Settings => self.settings_tab(ui),
+                Tab::Feedback => self.feedback_tab(ui),
             });
-        self.settings_window(ctx);
-        self.feedback_window(ctx);
     }
 }
 
@@ -729,107 +864,70 @@ pub fn ordered_sensors(info: &SysInfo) -> Vec<SensorReading> {
     sensors
 }
 
-fn configure_style(ctx: &egui::Context, accent: Color32) {
-    let mut style = (*ctx.style()).clone();
+fn configure_style(ctx: &egui::Context, theme: UiTheme, accent: Color32) {
+    let egui_theme = match theme {
+        UiTheme::Light => egui::Theme::Light,
+        UiTheme::Dark => egui::Theme::Dark,
+    };
+    ctx.set_theme(egui_theme);
+    let p = palette(theme, accent);
+    let mut style = (*ctx.style_of(egui_theme)).clone();
     style.spacing.item_spacing = Vec2::new(8.0, 8.0);
     style.spacing.button_padding = Vec2::new(12.0, 7.0);
-    style.visuals = egui::Visuals::dark();
-    style.visuals.panel_fill = BACKGROUND;
-    style.visuals.extreme_bg_color = Color32::from_rgb(20, 22, 24);
-    style.visuals.faint_bg_color = SURFACE;
-    style.visuals.text_edit_bg_color = Some(Color32::from_rgb(27, 30, 33));
-    style.visuals.selection.bg_fill = accent.gamma_multiply(0.45);
-    style.visuals.selection.stroke = Stroke::new(1.0, accent);
-    style.visuals.widgets.inactive.bg_fill = RAISED;
-    style.visuals.widgets.inactive.fg_stroke.color = LABEL;
-    style.visuals.widgets.hovered.bg_fill = accent.gamma_multiply(0.22);
-    style.visuals.widgets.active.bg_fill = accent.gamma_multiply(0.38);
-    ctx.set_style(style);
-}
-
-fn card<R>(ui: &mut egui::Ui, height: f32, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
-    egui::Frame::new()
-        .fill(SURFACE)
-        .stroke(Stroke::new(1.0, DIVIDER))
-        .corner_radius(10.0)
-        .inner_margin(16.0)
-        .show(ui, |ui| {
-            ui.set_min_height((height - 34.0).max(360.0));
-            add(ui)
-        })
-        .inner
-}
-
-fn heading(ui: &mut egui::Ui, text: &str, accent: Color32) {
-    ui.label(RichText::new(text).size(12.0).strong().color(accent));
-}
-
-fn header_button<'a>(text: &'a str, accent: Color32) -> egui::Button<'a> {
-    egui::Button::new(RichText::new(text).strong().color(accent))
-        .frame(true)
-        .fill(SURFACE)
-        .stroke(Stroke::new(1.0, DIVIDER))
-        .corner_radius(7.0)
-}
-
-fn sensor_row(
-    ui: &mut egui::Ui,
-    sensor: &SensorReading,
-    selected: bool,
-    accent: Color32,
-) -> egui::Response {
-    let (rect, response) =
-        ui.allocate_exact_size(Vec2::new(ui.available_width(), 31.0), Sense::click());
-    let fill = if selected {
-        accent.gamma_multiply(0.16)
-    } else if response.hovered() {
-        RAISED
-    } else {
-        Color32::TRANSPARENT
+    style.visuals = match theme {
+        UiTheme::Light => egui::Visuals::light(),
+        UiTheme::Dark => egui::Visuals::dark(),
     };
-    ui.painter().rect_filled(rect, 5.0, fill);
-    if selected {
-        ui.painter().rect_filled(
-            egui::Rect::from_min_max(rect.min, egui::pos2(rect.left() + 3.0, rect.bottom())),
-            2.0,
-            accent,
-        );
-    }
-    let font = TextStyle::Body.resolve(ui.style());
-    ui.painter().text(
-        rect.left_center() + egui::vec2(10.0, 0.0),
-        Align2::LEFT_CENTER,
-        &sensor.name,
-        font.clone(),
-        LABEL,
-    );
-    ui.painter().text(
-        rect.right_center() - egui::vec2(10.0, 0.0),
-        Align2::RIGHT_CENTER,
-        sensor_value(sensor),
-        font,
-        sensor_color(sensor),
-    );
-    ui.painter().line_segment(
-        [rect.left_bottom(), rect.right_bottom()],
-        Stroke::new(1.0, DIVIDER.gamma_multiply(0.65)),
-    );
-    response
+    style.visuals.panel_fill = p.background;
+    style.visuals.extreme_bg_color = p.plot_bg;
+    style.visuals.faint_bg_color = p.hover;
+    style.visuals.text_edit_bg_color = Some(p.edit_bg);
+    style.visuals.selection.bg_fill = p.selection;
+    style.visuals.selection.stroke = Stroke::new(1.0, p.graph);
+    style.visuals.widgets.inactive.bg_fill = p.hover;
+    style.visuals.widgets.inactive.fg_stroke.color = p.text;
+    style.visuals.widgets.hovered.bg_fill = p.hover;
+    style.visuals.widgets.active.bg_fill = p.selection;
+    ctx.set_style_of(egui_theme, style);
 }
 
-fn graph(ui: &mut egui::Ui, samples: &[f32], stats: SensorStats, accent: Color32) {
-    let (rect, _) = ui.allocate_exact_size(
-        Vec2::new(ui.available_width(), ui.available_height().max(230.0)),
-        Sense::hover(),
-    );
-    ui.painter()
-        .rect_filled(rect, 8.0, Color32::from_rgb(22, 24, 27));
-    let graph = rect.shrink2(Vec2::new(12.0, 20.0));
+fn sparkline(painter: &egui::Painter, rect: Rect, samples: &[f32], color: Color32) {
+    if samples.len() < 2 {
+        return;
+    }
+    let min = samples.iter().cloned().fold(f32::INFINITY, f32::min);
+    let max = samples.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+    let padding = ((max - min).abs() * 0.2).max(0.3);
+    let lower = min - padding;
+    let upper = max + padding;
+    let span = (upper - lower).max(0.01);
+    let points = samples
+        .iter()
+        .enumerate()
+        .map(|(index, value)| {
+            let x = egui::lerp(
+                rect.left()..=rect.right(),
+                index as f32 / (samples.len() - 1) as f32,
+            );
+            let y = egui::lerp(
+                rect.bottom()..=rect.top(),
+                ((*value - lower) / span).clamp(0.0, 1.0),
+            );
+            egui::pos2(x, y)
+        })
+        .collect();
+    painter.add(egui::Shape::line(points, Stroke::new(1.5, color)));
+}
+
+fn graph(ui: &mut egui::Ui, samples: &[f32], stats: SensorStats, p: Palette) {
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 128.0), Sense::hover());
+    ui.painter().rect_filled(rect, 6.0, p.plot_bg);
+    let plot = rect.shrink2(Vec2::new(12.0, 18.0));
     for step in 0..=4 {
-        let y = egui::lerp(graph.top()..=graph.bottom(), step as f32 / 4.0);
+        let y = egui::lerp(plot.top()..=plot.bottom(), step as f32 / 4.0);
         ui.painter().line_segment(
-            [egui::pos2(graph.left(), y), egui::pos2(graph.right(), y)],
-            Stroke::new(1.0, DIVIDER.gamma_multiply(0.55)),
+            [egui::pos2(plot.left(), y), egui::pos2(plot.right(), y)],
+            Stroke::new(1.0, p.divider.gamma_multiply(0.55)),
         );
     }
     let padding = ((stats.max - stats.min).abs() * 0.20)
@@ -839,18 +937,18 @@ fn graph(ui: &mut egui::Ui, samples: &[f32], stats: SensorStats, accent: Color32
     let upper = stats.max + padding;
     let span = (upper - lower).max(0.01);
     ui.painter().text(
-        graph.left_top(),
+        plot.left_top(),
         Align2::LEFT_TOP,
         format!("{upper:.1}"),
         FontId::monospace(10.0),
-        MUTED,
+        p.muted,
     );
     ui.painter().text(
-        graph.left_bottom(),
+        plot.left_bottom(),
         Align2::LEFT_BOTTOM,
         format!("{lower:.1}"),
         FontId::monospace(10.0),
-        MUTED,
+        p.muted,
     );
     if samples.len() < 2 {
         return;
@@ -860,24 +958,25 @@ fn graph(ui: &mut egui::Ui, samples: &[f32], stats: SensorStats, accent: Color32
         .enumerate()
         .map(|(index, value)| {
             let x = egui::lerp(
-                graph.left()..=graph.right(),
+                plot.left()..=plot.right(),
                 index as f32 / (samples.len() - 1) as f32,
             );
             let y = egui::lerp(
-                graph.bottom()..=graph.top(),
+                plot.bottom()..=plot.top(),
                 ((*value - lower) / span).clamp(0.0, 1.0),
             );
             egui::pos2(x, y)
         })
         .collect();
     ui.painter()
-        .add(egui::Shape::line(points, Stroke::new(2.2, accent)));
+        .add(egui::Shape::line(points, Stroke::new(2.2, p.graph)));
 }
 
 fn metric_chip(ui: &mut egui::Ui, label: &str, value: f32, unit: &str, color: Color32) {
     egui::Frame::new()
-        .fill(RAISED)
-        .corner_radius(6.0)
+        .fill(Color32::TRANSPARENT)
+        .stroke(Stroke::new(1.0, color.gamma_multiply(0.5)))
+        .corner_radius(4.0)
         .inner_margin(egui::Margin::symmetric(10, 6))
         .show(ui, |ui| {
             ui.label(
@@ -902,12 +1001,12 @@ fn sensor_value(sensor: &SensorReading) -> String {
     }
 }
 
-fn sensor_color(sensor: &SensorReading) -> Color32 {
+fn sensor_color(sensor: &SensorReading, p: Palette) -> Color32 {
     match metadata(sensor).kind {
-        SensorKind::HotspotTemperature if sensor.value >= 90.0 => RED,
-        SensorKind::GpuCoreTemperature if sensor.value >= 83.0 => RED,
-        SensorKind::MemoryTemperature if sensor.value >= 80.0 => AMBER,
-        _ => VALUE,
+        SensorKind::HotspotTemperature if sensor.value >= 90.0 => p.danger,
+        SensorKind::GpuCoreTemperature if sensor.value >= 83.0 => p.danger,
+        SensorKind::MemoryTemperature if sensor.value >= 80.0 => p.warning,
+        _ => p.value,
     }
 }
 
@@ -925,16 +1024,10 @@ fn sensor_tooltip(kind: SensorKind, language: Language) -> &'static str {
         (SensorKind::HotspotTemperature, Language::English) => {
             "HotSpot is shown only when the provider exposes a validated value."
         }
-        (_, Language::Russian) => "Нажмите для графика; двойной клик показывает максимум сессии.",
-        (_, Language::English) => "Click for a graph; double-click shows the session maximum.",
-    }
-}
-
-fn group_title(group: SensorGroup, language: Language) -> &'static str {
-    match group {
-        SensorGroup::Gpu => "GPU",
-        SensorGroup::Activity => language.text(Key::GpuActivity),
-        SensorGroup::System => language.text(Key::System),
+        (_, Language::Russian) => "Клик — график детали; двойной клик включает максимум сессии.",
+        (_, Language::English) => {
+            "Click for the detail graph; double-click toggles the session maximum."
+        }
     }
 }
 
@@ -993,7 +1086,12 @@ mod tests {
     use super::*;
 
     fn info(sensors: &[(&str, f32, &str)]) -> SysInfo {
-        let sensors = sensors.iter().map(|(name, value, unit)| serde_json::json!({"name": name, "value": value, "unit": unit})).collect::<Vec<_>>();
+        let sensors = sensors
+            .iter()
+            .map(|(name, value, unit)| {
+                serde_json::json!({"name": name, "value": value, "unit": unit})
+            })
+            .collect::<Vec<_>>();
         serde_json::from_value(serde_json::json!({"gpu_name": "egui fixture", "sensors": sensors}))
             .expect("safe fixture")
     }

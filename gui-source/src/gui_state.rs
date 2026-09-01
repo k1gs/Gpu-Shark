@@ -1,6 +1,8 @@
 use crate::sensor_model::{SensorId, metadata, sensor_id};
 use gpu_shark::SensorReading;
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
+
+const ROW_SAMPLE_LIMIT: usize = 120;
 
 #[derive(Clone, Copy, Debug)]
 pub struct SensorStats {
@@ -15,6 +17,7 @@ pub struct SensorHistory {
     stats: Option<SensorStats>,
     samples: VecDeque<f32>,
     show_maximum: bool,
+    rows: HashMap<SensorId, VecDeque<f32>>,
 }
 
 impl SensorHistory {
@@ -40,8 +43,21 @@ impl SensorHistory {
     }
 
     pub fn select_maximum(&mut self, sensor: &SensorReading) {
+        let id = sensor_id(sensor);
+        if self.selected.as_ref() == Some(&id) && self.show_maximum {
+            self.show_maximum = false;
+            return;
+        }
         self.select(sensor);
         self.show_maximum = metadata(sensor).graphable;
+    }
+
+    #[allow(dead_code)]
+    pub fn clear_selection(&mut self) {
+        self.selected = None;
+        self.stats = None;
+        self.samples.clear();
+        self.show_maximum = false;
     }
 
     pub fn shows_maximum(&self) -> bool {
@@ -53,6 +69,16 @@ impl SensorHistory {
     }
 
     pub fn record(&mut self, sensors: &[SensorReading]) {
+        for sensor in sensors {
+            if !metadata(sensor).graphable {
+                continue;
+            }
+            let row = self.rows.entry(sensor_id(sensor)).or_default();
+            row.push_back(sensor.value);
+            while row.len() > ROW_SAMPLE_LIMIT {
+                row.pop_front();
+            }
+        }
         let Some(selected) = self.selected.as_ref() else {
             return;
         };
@@ -86,7 +112,16 @@ impl SensorHistory {
         self.samples.iter().copied().collect()
     }
 
+    #[allow(dead_code)]
+    pub fn row_samples(&self, id: &SensorId) -> Vec<f32> {
+        self.rows
+            .get(id)
+            .map(|row| row.iter().copied().collect())
+            .unwrap_or_default()
+    }
+
     pub fn reset(&mut self) {
+        self.rows.clear();
         if let Some(stats) = &mut self.stats {
             stats.min = stats.current;
             stats.max = stats.current;
@@ -154,5 +189,51 @@ mod tests {
         assert!(!history.shows_maximum());
         assert!(history.stats().is_none());
         assert!(history.samples().is_empty());
+    }
+
+    #[test]
+    fn row_sparklines_record_every_graphable_sensor_and_reset_clears() {
+        let core = reading("GPU Core", 40.0);
+        let fan = SensorReading {
+            name: "GPU Fan 1".to_owned(),
+            value: 1_000.0,
+            unit: "RPM".to_owned(),
+        };
+        let mut history = SensorHistory::default();
+        history.record(&[core.clone(), fan.clone()]);
+        history.record(&[reading("GPU Core", 41.0)]);
+
+        assert_eq!(history.row_samples(&sensor_id(&core)), vec![40.0, 41.0]);
+        assert_eq!(history.row_samples(&sensor_id(&fan)), vec![1000.0]);
+        assert!(
+            history
+                .row_samples(&sensor_id(&perfcap_reading()))
+                .is_empty()
+        );
+
+        history.reset();
+        assert!(history.row_samples(&sensor_id(&core)).is_empty());
+    }
+
+    #[test]
+    fn double_click_toggles_maximum_tracking() {
+        let mut history = SensorHistory::default();
+        history.select_maximum(&reading("GPU Core", 40.0));
+        assert!(history.shows_maximum());
+
+        history.select_maximum(&reading("GPU Core", 45.0));
+        assert!(!history.shows_maximum());
+        assert_eq!(
+            history.selected_id(),
+            Some(&sensor_id(&reading("GPU Core", 44.0)))
+        );
+    }
+
+    fn perfcap_reading() -> SensorReading {
+        SensorReading {
+            name: "PerfCap Reason".to_owned(),
+            value: 0.0,
+            unit: "Pwr, VRel".to_owned(),
+        }
     }
 }
