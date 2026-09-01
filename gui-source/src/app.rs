@@ -148,6 +148,7 @@ pub struct GpuSharkApp {
     feedback_sending: bool,
     feedback_status: FeedbackStatus,
     feedback_rx: Option<mpsc::Receiver<FeedbackStatus>>,
+    about_icon: Option<egui::TextureHandle>,
 }
 
 impl GpuSharkApp {
@@ -176,6 +177,7 @@ impl GpuSharkApp {
             feedback_sending: false,
             feedback_status: FeedbackStatus::Empty,
             feedback_rx: None,
+            about_icon: None,
         }
     }
 
@@ -215,12 +217,7 @@ impl GpuSharkApp {
         ui.set_min_height(34.0);
         ui.horizontal(|ui| {
             ui.add_space(6.0);
-            ui.label(
-                RichText::new("GPU SHARK")
-                    .size(10.5)
-                    .strong()
-                    .color(p.muted),
-            );
+            ui.label(RichText::new("GPU SHARK").size(12.0).strong().color(p.text));
             ui.add_space(14.0);
             for (tab, key) in [
                 (Tab::Sensors, Key::Sensors),
@@ -787,22 +784,33 @@ impl GpuSharkApp {
         });
     }
 
-    fn about_tab(&self, ui: &mut egui::Ui) {
+    fn about_tab(&mut self, ui: &mut egui::Ui) {
         let p = self.palette();
         let language = self.language();
+        if self.about_icon.is_none() {
+            self.about_icon = load_icon_texture(ui.ctx());
+        }
         ui.add_space(28.0);
         ui.allocate_ui(Vec2::new(480.0, ui.available_height()), |ui| {
-            ui.label(
-                RichText::new("GPU SHARK")
-                    .size(24.0)
-                    .strong()
-                    .color(p.graph),
-            );
-            ui.label(
-                RichText::new(format!("Version {}", env!("CARGO_PKG_VERSION")))
-                    .size(12.0)
-                    .color(p.muted),
-            );
+            ui.horizontal(|ui| {
+                if let Some(icon) = &self.about_icon {
+                    ui.add(egui::Image::new((icon.id(), Vec2::splat(72.0))));
+                    ui.add_space(12.0);
+                }
+                ui.vertical(|ui| {
+                    ui.label(
+                        RichText::new("GPU SHARK")
+                            .size(24.0)
+                            .strong()
+                            .color(p.graph),
+                    );
+                    ui.label(
+                        RichText::new(format!("Version {}", env!("CARGO_PKG_VERSION")))
+                            .size(12.0)
+                            .color(p.muted),
+                    );
+                });
+            });
             ui.add_space(14.0);
             ui.label(RichText::new(language.text(Key::AboutTagline)).color(p.text));
             ui.add_space(8.0);
@@ -884,6 +892,49 @@ fn install_fonts(ctx: &egui::Context) {
         .or_default()
         .push("ubuntu_light".to_owned());
     ctx.set_fonts(fonts);
+}
+
+fn load_icon_texture(ctx: &egui::Context) -> Option<egui::TextureHandle> {
+    let image = decode_bmp(include_bytes!("../assets/icon128.bmp"))?;
+    Some(ctx.load_texture("app-icon", image, egui::TextureOptions::LINEAR))
+}
+
+fn decode_bmp(data: &[u8]) -> Option<egui::ColorImage> {
+    if data.len() < 54 || data[0] != b'B' || data[1] != b'M' {
+        return None;
+    }
+    let offset = u32::from_le_bytes(data[10..14].try_into().ok()?) as usize;
+    let width = i32::from_le_bytes(data[18..22].try_into().ok()?);
+    let height = i32::from_le_bytes(data[22..26].try_into().ok()?);
+    let bpp = u16::from_le_bytes(data[28..30].try_into().ok()?);
+    let compression = u32::from_le_bytes(data[30..34].try_into().ok()?);
+    if bpp != 32 || compression != 0 || width <= 0 {
+        return None;
+    }
+    let width = width as usize;
+    let top_down = height < 0;
+    let rows = height.unsigned_abs() as usize;
+    let has_alpha = data[offset..]
+        .chunks_exact(4)
+        .take(width * rows)
+        .any(|pixel| pixel[3] != 0);
+    let mut pixels = Vec::with_capacity(width * rows);
+    for row in 0..rows {
+        let source = if top_down { row } else { rows - 1 - row };
+        let base = offset + source * width * 4;
+        for column in 0..width {
+            let i = base + column * 4;
+            let blue = *data.get(i)?;
+            let green = *data.get(i + 1)?;
+            let red = *data.get(i + 2)?;
+            let mut alpha = *data.get(i + 3)?;
+            if !has_alpha {
+                alpha = 255;
+            }
+            pixels.push(Color32::from_rgba_unmultiplied(red, green, blue, alpha));
+        }
+    }
+    Some(egui::ColorImage::new([width, rows], pixels))
 }
 
 fn connect_message(language: UiLanguage) -> String {
