@@ -152,7 +152,8 @@ pub struct GpuSharkApp {
 impl GpuSharkApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let outcome = settings::load();
-        let settings = outcome.settings;
+        let mut settings = outcome.settings;
+        settings.autostart = crate::autostart::is_enabled();
         configure_style(&cc.egui_ctx, settings.theme, accent_color(settings.accent));
         let refresh_interval = Arc::new(AtomicU64::new(settings.refresh_interval_ms));
         let (telemetry_rx, worker) =
@@ -191,7 +192,11 @@ impl GpuSharkApp {
     fn drain_updates(&mut self) {
         while let Ok(snapshot) = self.telemetry_rx.try_recv() {
             if let Snapshot::Data(info) = &snapshot {
-                self.history.record(&ordered_sensors(info));
+                let sensors = ordered_sensors(info);
+                if self.settings.track_all_maxima {
+                    self.history.track_all(&sensors);
+                }
+                self.history.record(&sensors);
             }
             self.snapshot = Some(snapshot);
         }
@@ -625,6 +630,12 @@ impl GpuSharkApp {
                         }),
                     );
                     ui.end_row();
+                    ui.label(language.text(Key::TrackAllMaxima));
+                    ui.checkbox(&mut self.settings_draft.track_all_maxima, "");
+                    ui.end_row();
+                    ui.label(language.text(Key::Autostart));
+                    ui.checkbox(&mut self.settings_draft.autostart, "");
+                    ui.end_row();
                 });
             ui.add_space(16.0);
             ui.separator();
@@ -673,6 +684,9 @@ impl GpuSharkApp {
             self.settings_draft = self.settings.clone();
         }
         if apply {
+            if let Err(error) = crate::autostart::set(self.settings_draft.autostart) {
+                self.settings_notice = Some(error);
+            }
             match settings::save(&self.settings_draft) {
                 Ok(()) => {
                     self.settings = self.settings_draft.clone();

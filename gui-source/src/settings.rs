@@ -48,6 +48,8 @@ pub struct AppSettings {
     pub refresh_interval_ms: u64,
     pub accent: AccentTheme,
     pub temperature_unit: TemperatureUnit,
+    pub track_all_maxima: bool,
+    pub autostart: bool,
 }
 
 impl Default for AppSettings {
@@ -59,6 +61,8 @@ impl Default for AppSettings {
             refresh_interval_ms: 1_000,
             accent: AccentTheme::Green,
             temperature_unit: TemperatureUnit::Celsius,
+            track_all_maxima: true,
+            autostart: false,
         }
     }
 }

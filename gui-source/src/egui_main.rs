@@ -3,6 +3,7 @@
 #![windows_subsystem = "windows"]
 
 mod app;
+mod autostart;
 mod feedback;
 mod gui_i18n;
 mod gui_state;

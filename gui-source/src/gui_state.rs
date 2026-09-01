@@ -93,6 +93,16 @@ impl SensorHistory {
         self.selected = Some(id);
     }
 
+    /// Tracks every graphable sensor, as if each row had been double-clicked.
+    #[allow(dead_code)]
+    pub fn track_all(&mut self, sensors: &[SensorReading]) {
+        for sensor in sensors {
+            if metadata(sensor).graphable {
+                self.tracked.insert(sensor_id(sensor));
+            }
+        }
+    }
+
     #[allow(dead_code)]
     pub fn is_tracked(&self, id: &SensorId) -> bool {
         self.tracked.contains(id)
