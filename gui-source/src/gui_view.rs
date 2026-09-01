@@ -8,6 +8,7 @@ use windows_sys::Win32::Graphics::Gdi::{
     CreatePen, CreateSolidBrush, DeleteObject, FillRect, GetTextExtentPoint32W, HDC, LineTo,
     MoveToEx, PS_SOLID, SelectObject, SetTextColor, TextOutW,
 };
+use windows_sys::Win32::UI::WindowsAndMessaging::{DI_NORMAL, DrawIconEx, HICON};
 
 pub const BACKGROUND: u32 = rgb(30, 30, 30);
 static ACCENT_COLOR: AtomicU32 = AtomicU32::new(rgb(87, 227, 137));
@@ -25,6 +26,69 @@ const LIST_TOP: i32 = 124;
 const LIST_WIDTH: i32 = 548;
 const ROW_HEIGHT: i32 = 23;
 const MAX_ROWS: usize = 14;
+
+pub const FEEDBACK_CONTACT_EDIT: RECT = RECT {
+    left: 36,
+    top: 244,
+    right: 936,
+    bottom: 272,
+};
+pub const FEEDBACK_MESSAGE_EDIT: RECT = RECT {
+    left: 36,
+    top: 310,
+    right: 936,
+    bottom: 420,
+};
+pub const FEEDBACK_CONSENT_HIT: RECT = RECT {
+    left: 30,
+    top: 430,
+    right: 720,
+    bottom: 472,
+};
+pub const FEEDBACK_SUBMIT_HIT: RECT = RECT {
+    left: 30,
+    top: 476,
+    right: 480,
+    bottom: 518,
+};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HeaderNavLayout {
+    pub about: (i32, i32),
+    pub settings: (i32, i32),
+    pub feedback: (i32, i32),
+}
+
+pub const HEADER_NAV_GAP: i32 = 24;
+const HEADER_NAV_RIGHT_MARGIN: i32 = 16;
+
+pub fn header_nav_layout(
+    client_right: i32,
+    about_width: i32,
+    settings_width: i32,
+    feedback_width: i32,
+) -> HeaderNavLayout {
+    let feedback_right = client_right - HEADER_NAV_RIGHT_MARGIN;
+    let feedback_left = feedback_right - feedback_width;
+    let settings_right = feedback_left - HEADER_NAV_GAP;
+    let settings_left = settings_right - settings_width;
+    let about_right = settings_left - HEADER_NAV_GAP;
+    let about_left = about_right - about_width;
+    HeaderNavLayout {
+        about: (about_left, about_right),
+        settings: (settings_left, settings_right),
+        feedback: (feedback_left, feedback_right),
+    }
+}
+
+pub const fn header_link_contains(link: (i32, i32), x: i32) -> bool {
+    const HIT_PADDING: i32 = 8;
+    x >= link.0 - HIT_PADDING && x <= link.1 + HIT_PADDING
+}
+
+pub const fn point_in_rect(rect: &RECT, x: i32, y: i32) -> bool {
+    x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom
+}
 
 pub const fn rgb(r: u8, g: u8, b: u8) -> u32 {
     (r as u32) | ((g as u32) << 8) | ((b as u32) << 16)
@@ -61,6 +125,33 @@ pub fn ordered_sensors(info: &SysInfo) -> Vec<SensorReading> {
     sensors
 }
 
+fn is_geforce_rtx_50_series(gpu_name: Option<&str>) -> bool {
+    let Some(name) = gpu_name.map(str::to_ascii_lowercase) else {
+        return false;
+    };
+    if !name.contains("geforce rtx") {
+        return false;
+    }
+    let Some(model) = name.split("rtx ").nth(1) else {
+        return false;
+    };
+    let digits = model
+        .chars()
+        .take_while(char::is_ascii_digit)
+        .collect::<String>();
+    digits.len() >= 4 && digits.starts_with("50")
+}
+
+fn sensor_label(sensor: &SensorReading, info: &SysInfo, language: Language) -> String {
+    if metadata(sensor).kind == SensorKind::HotspotTemperature
+        && is_geforce_rtx_50_series(info.gpu_name.as_deref())
+    {
+        format!("{} ({})", sensor.name, language.text(Key::Beta))
+    } else {
+        sensor.name.clone()
+    }
+}
+
 fn group_title(group: SensorGroup, language: Language) -> &'static str {
     match group {
         SensorGroup::Gpu => "GPU",
@@ -81,7 +172,7 @@ fn text(hdc: HDC, x: i32, y: i32, value: &str, color: u32) {
     }
 }
 
-fn text_width(hdc: HDC, value: &str) -> i32 {
+pub fn text_width(hdc: HDC, value: &str) -> i32 {
     let wide = wstr(value);
     let mut size = SIZE { cx: 0, cy: 0 };
     unsafe {
@@ -255,7 +346,8 @@ pub fn draw_dashboard(
                 accent(),
             );
         }
-        clipped(hdc, LIST_LEFT + 20, y + 2, &sensor.name, LABEL, 310);
+        let label = sensor_label(sensor, info, language);
+        clipped(hdc, LIST_LEFT + 20, y + 2, &label, LABEL, 310);
         let previous = unsafe { SelectObject(hdc, bold_font) };
         let value = sensor_value(sensor);
         let value_x = list_right - 20 - text_width(hdc, &value);
@@ -324,7 +416,7 @@ fn draw_selected_panel(
         hdc,
         left + 16,
         top + 54,
-        &sensor.name,
+        &sensor_label(sensor, info, language),
         VALUE,
         right - left - 32,
     );
@@ -507,31 +599,31 @@ pub fn draw_feedback_form(
     text(
         hdc,
         36,
-        LIST_TOP + 130,
+        LIST_TOP + 160,
         language.text(Key::FeedbackDescription),
         MUTED,
     );
     let consent_rect = RECT {
         left: 36,
-        top: LIST_TOP + 286,
+        top: LIST_TOP + 314,
         right: 54,
-        bottom: LIST_TOP + 304,
+        bottom: LIST_TOP + 332,
     };
     fill(hdc, &consent_rect, if consent { accent() } else { DIVIDER });
     if consent {
-        text(hdc, 39, LIST_TOP + 285, "✓", BACKGROUND);
+        text(hdc, 39, LIST_TOP + 313, "✓", BACKGROUND);
     }
     text(
         hdc,
         64,
-        LIST_TOP + 286,
+        LIST_TOP + 314,
         language.text(Key::FeedbackConsent),
         LABEL,
     );
     text(
         hdc,
         36,
-        LIST_TOP + 330,
+        LIST_TOP + 358,
         if sending {
             language.text(Key::FeedbackSending)
         } else {
@@ -539,7 +631,7 @@ pub fn draw_feedback_form(
         },
         if consent && !sending { accent() } else { MUTED },
     );
-    clipped(hdc, 36, LIST_TOP + 368, status, LABEL, client.right - 72);
+    clipped(hdc, 36, LIST_TOP + 396, status, LABEL, client.right - 72);
     text(
         hdc,
         client.right - 95,
@@ -547,6 +639,56 @@ pub fn draw_feedback_form(
         language.text(Key::Back),
         accent(),
     );
+}
+
+pub fn draw_about(hdc: HDC, client: &RECT, icon: HICON, language: Language, version: &str) {
+    fill(
+        hdc,
+        &RECT {
+            left: 16,
+            top: LIST_TOP,
+            right: client.right - 16,
+            bottom: client.bottom - 16,
+        },
+        SURFACE,
+    );
+    text(hdc, 36, LIST_TOP + 28, language.text(Key::About), accent());
+    text(
+        hdc,
+        client.right - 95,
+        LIST_TOP + 28,
+        language.text(Key::Back),
+        accent(),
+    );
+    if icon != 0 {
+        unsafe {
+            DrawIconEx(hdc, 52, LIST_TOP + 82, icon, 128, 128, 0, 0, DI_NORMAL);
+        }
+    }
+    text(hdc, 220, LIST_TOP + 88, "GPU Shark", VALUE);
+    text(hdc, 220, LIST_TOP + 120, version, accent());
+    text(
+        hdc,
+        220,
+        LIST_TOP + 166,
+        language.text(Key::AboutTagline),
+        LABEL,
+    );
+    text(
+        hdc,
+        220,
+        LIST_TOP + 198,
+        language.text(Key::AboutReadOnly),
+        LABEL,
+    );
+    text(
+        hdc,
+        220,
+        LIST_TOP + 230,
+        language.text(Key::AboutLicense),
+        MUTED,
+    );
+    text(hdc, 220, LIST_TOP + 262, "© 2026 k1gs", MUTED);
 }
 
 #[cfg(test)]
@@ -598,6 +740,47 @@ mod tests {
     }
 
     #[test]
+    fn rtx_50_hotspot_uses_a_localized_beta_label_without_changing_sensor_id() {
+        let mut snapshot = info(&[("GPU Hot Spot", 72.0, "°C")]);
+        snapshot.gpu_name = Some("NVIDIA GeForce RTX 5050".to_owned());
+        let hotspot = ordered_sensors(&snapshot)
+            .into_iter()
+            .next()
+            .expect("visible HotSpot");
+
+        assert_eq!(
+            sensor_label(&hotspot, &snapshot, Language::English),
+            "GPU Hot Spot (BETA)"
+        );
+        assert_eq!(
+            sensor_label(&hotspot, &snapshot, Language::Russian),
+            "GPU Hot Spot (БЕТА)"
+        );
+        assert_eq!(
+            sensor_id(&hotspot),
+            sensor_id(&SensorReading {
+                name: "GPU Hot Spot".to_owned(),
+                value: hotspot.value,
+                unit: hotspot.unit.clone(),
+            })
+        );
+    }
+
+    #[test]
+    fn beta_label_is_not_applied_to_non_rtx_50_hotspots() {
+        let snapshot = info(&[("GPU Hot Spot", 72.0, "°C")]);
+        let hotspot = ordered_sensors(&snapshot)
+            .into_iter()
+            .next()
+            .expect("visible HotSpot");
+
+        assert_eq!(
+            sensor_label(&hotspot, &snapshot, Language::English),
+            "GPU Hot Spot"
+        );
+    }
+
+    #[test]
     fn list_hit_testing_cannot_select_the_graph_panel() {
         let snapshot = info(&[("GPU Core", 60.0, "°C"), ("Hot Spot", 74.0, "°C")]);
 
@@ -608,5 +791,24 @@ mod tests {
             "GPU Core"
         );
         assert!(sensor_at_point(&snapshot, 700, 190).is_none());
+    }
+
+    #[test]
+    fn feedback_controls_leave_labels_and_each_other_visible() {
+        assert!(FEEDBACK_CONTACT_EDIT.top >= LIST_TOP + 116);
+        assert!(FEEDBACK_MESSAGE_EDIT.top >= LIST_TOP + 180);
+        assert!(FEEDBACK_MESSAGE_EDIT.top > FEEDBACK_CONTACT_EDIT.bottom);
+        assert!(FEEDBACK_CONSENT_HIT.top > FEEDBACK_MESSAGE_EDIT.bottom);
+        assert!(FEEDBACK_SUBMIT_HIT.top > FEEDBACK_CONSENT_HIT.top);
+    }
+
+    #[test]
+    fn localized_header_navigation_keeps_fixed_gaps() {
+        let layout = header_nav_layout(964, 119, 91, 139);
+        assert_eq!(layout.settings.0 - layout.about.1, HEADER_NAV_GAP);
+        assert_eq!(layout.feedback.0 - layout.settings.1, HEADER_NAV_GAP);
+        assert!(layout.about.0 > 120);
+        assert!(header_link_contains(layout.about, layout.about.0));
+        assert!(!header_link_contains(layout.about, layout.settings.0));
     }
 }

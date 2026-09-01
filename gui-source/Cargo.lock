@@ -1174,7 +1174,7 @@ dependencies = [
 
 [[package]]
 name = "gpu-shark"
-version = "0.2.2"
+version = "0.2.4-beta.1"
 dependencies = [
  "eframe",
  "libloading",

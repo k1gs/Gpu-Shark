@@ -17,7 +17,7 @@ on:
       runtime_tag:
         description: "Release tag providing the prebuilt public runtime"
         required: true
-        default: "v0.2.2"
+        default: "v0.2.4-beta.1"
         type: string
 
 permissions:
@@ -28,9 +28,10 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  RUNTIME_TAG: ${{ inputs.runtime_tag || 'v0.2.2' }}
+  RUNTIME_TAG: ${{ inputs.runtime_tag || 'v0.2.4-beta.1' }}
   GPU_SHARK_FEEDBACK_HOST: ${{ github.event_name != 'pull_request' && secrets.GPU_SHARK_FEEDBACK_HOST || 'feedback.invalid' }}
   GPU_SHARK_FEEDBACK_PATH: ${{ github.event_name != 'pull_request' && secrets.GPU_SHARK_FEEDBACK_PATH || '/disabled' }}
+  GPU_SHARK_EMBED_PUBLIC_RUNTIME: "1"
 
 jobs:
   build:
@@ -51,19 +52,7 @@ jobs:
           rustc --version
           cargo --version
 
-      - name: Check formatting
-        shell: pwsh
-        run: cargo fmt --manifest-path .\gui-source\Cargo.toml -- --check
-
-      - name: Check public GUI
-        shell: pwsh
-        run: cargo check --manifest-path .\gui-source\Cargo.toml --locked
-
-      - name: Build public GUI
-        shell: pwsh
-        run: cargo build --manifest-path .\gui-source\Cargo.toml --release --locked
-
-      - name: Download and verify matching runtime
+      - name: Download and verify public runtime
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -92,10 +81,44 @@ jobs:
             throw "Runtime archive checksum mismatch"
           }
 
+          $payloadDirectory = Join-Path $env:RUNNER_TEMP "GPU-Shark-public-runtime"
+          Expand-Archive -LiteralPath $archivePath -DestinationPath $payloadDirectory
+          Add-Content -LiteralPath $env:GITHUB_ENV -Value "GPU_SHARK_PUBLIC_PAYLOAD_DIR=$payloadDirectory"
+
+      - name: Remap local Rust build paths
+        shell: pwsh
+        run: |
+          $separator = [char]0x1f
+          $flags = @(
+            "--remap-path-prefix=$env:GITHUB_WORKSPACE=/src",
+            "--remap-path-prefix=$env:USERPROFILE=/user"
+          )
+          $encoded = [string]::Join($separator, $flags)
+          Add-Content -LiteralPath $env:GITHUB_ENV -Value "CARGO_ENCODED_RUSTFLAGS=$encoded"
+
+      - name: Check formatting
+        shell: pwsh
+        run: cargo fmt --manifest-path .\gui-source\Cargo.toml -- --check
+
+      - name: Check public GUI
+        shell: pwsh
+        run: cargo check --manifest-path .\gui-source\Cargo.toml --locked
+
+      - name: Build public GUI
+        shell: pwsh
+        run: cargo build --manifest-path .\gui-source\Cargo.toml --release --locked
+
+      - name: Assemble standalone CI package
+        shell: pwsh
+        run: |
           $bundle = Join-Path $env:RUNNER_TEMP "GPU-Shark-ci-win-x64"
-          Expand-Archive -LiteralPath $archivePath -DestinationPath $bundle
+          New-Item -ItemType Directory -Path $bundle | Out-Null
           Copy-Item -LiteralPath ".\gui-source\target\release\gpu-shark-gui.exe" `
             -Destination (Join-Path $bundle "GPU-Shark.exe")
+          Copy-Item -LiteralPath (Join-Path $env:GPU_SHARK_PUBLIC_PAYLOAD_DIR "LICENSE") -Destination $bundle
+          Copy-Item -LiteralPath (Join-Path $env:GPU_SHARK_PUBLIC_PAYLOAD_DIR "THIRD_PARTY_NOTICES.md") -Destination $bundle
+          Copy-Item -LiteralPath (Join-Path $env:GPU_SHARK_PUBLIC_PAYLOAD_DIR "README.txt") -Destination $bundle
+          Copy-Item -LiteralPath (Join-Path $env:GPU_SHARK_PUBLIC_PAYLOAD_DIR "LICENSES") -Destination $bundle -Recurse
 
           @(
             "GUI commit: ${{ github.sha }}"
@@ -103,7 +126,7 @@ jobs:
             "Workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           ) | Set-Content -LiteralPath (Join-Path $bundle "BUILD_INFO.txt") -Encoding utf8
 
-          $required = @("GPU-Shark.exe", "gs.dll", "gsn.dll", "LICENSE", "THIRD_PARTY_NOTICES.md")
+          $required = @("GPU-Shark.exe", "LICENSE", "THIRD_PARTY_NOTICES.md", "README.txt", "LICENSES")
           foreach ($name in $required) {
             if (-not (Test-Path -LiteralPath (Join-Path $bundle $name))) {
               throw "Packaged artifact is missing $name"
@@ -111,6 +134,30 @@ jobs:
           }
           if (Get-ChildItem -LiteralPath $bundle -Recurse -Filter "*.pdb") {
             throw "Debug symbols must not be uploaded"
+          }
+          if (Get-ChildItem -LiteralPath $bundle -Recurse -Filter "*.dll") {
+            throw "Standalone CI package must not contain adjacent DLLs"
+          }
+
+          $publicExe = Join-Path $bundle "GPU-Shark.exe"
+          $bytes = [System.IO.File]::ReadAllBytes($publicExe)
+          $ascii = [System.Text.Encoding]::Latin1.GetString($bytes)
+          $unicode = [System.Text.Encoding]::Unicode.GetString($bytes)
+          $forbidden = @(
+            "GPU UUID",
+            $env:GITHUB_WORKSPACE,
+            $env:USERPROFILE,
+            $env:COMPUTERNAME
+          ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+          foreach ($marker in $forbidden) {
+            if ($ascii.Contains($marker) -or $unicode.Contains($marker)) {
+              throw "Public executable contains a forbidden privacy marker"
+            }
+          }
+          foreach ($marker in @("requireAdministrator", "PerMonitorV2", "gs.dll", "gsn.dll")) {
+            if (-not ($ascii.Contains($marker) -or $unicode.Contains($marker))) {
+              throw "Public executable is missing a required package marker"
+            }
           }
 
       - name: Upload CI package
