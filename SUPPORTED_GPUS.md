@@ -13,9 +13,10 @@ imply that every board variant exposes the same sensors.
 | GeForce RTX 3080 | Yes | Validated | Validated | Validated board profile |
 | GeForce RTX 4060 | Yes | Validated | Board-dependent | Validated board profile |
 | GeForce RTX 4090 | Yes | Validated | Under validation | Validated HotSpot profile |
-| GeForce RTX 5050 | Yes | Beta | Validated | Exact desktop 10DE:2D83 beta profile |
-| GeForce RTX 5070 | Yes | Not exposed | Yes on tested board | Experimental RTX 50 support |
-| GeForce RTX 5070 Ti | Yes | Not exposed | Yes on tested board | Experimental RTX 50 support |
+| GeForce RTX 5050 | Yes | Beta | Beta | GPC register HotSpot profile |
+| GeForce RTX 5060 Ti | Yes | Beta | Beta | GPC register HotSpot profile |
+| GeForce RTX 5070 | Yes | Beta | Beta | GPC register HotSpot profile |
+| GeForce RTX 5070 Ti | Yes | Beta | Beta | GPC register HotSpot profile |
 | Other NVIDIA GPUs | Usually | Driver-dependent | Driver/board-dependent | Conservative fallback |
 
 When a value cannot be validated, GPU Shark displays `N/A`. This is intentional.

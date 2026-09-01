@@ -70,12 +70,13 @@ Enhanced temperature support is deliberately tracked per validated device
 profile.[^sensor-availability]
 
 > [!WARNING]
-> GeForce RTX 50-series HotSpot support is **beta**. The current verified
-> enhanced native fallback profile is the desktop GeForce RTX 5050 (10DE:2D83);
-> other RTX 50 cards use the conservative provider path until their exact
-> hardware profiles are validated.
-> GPU Shark marks any displayed RTX 50 HotSpot row as <code>BETA</code>. The
-> label does not manufacture a missing reading.
+> GeForce RTX 50-series enhanced temperatures are **beta**. GPU Shark rejects
+> the LibreHardwareMonitor Hot Spot and Memory Temperature channels on every
+> GeForce RTX 50 card — they were confirmed to publish Core-like or missing
+> values — and reads HotSpot through a read-only GPC register path instead.
+> On boards without a same-board validated profile the reading falls back to
+> an explicitly unverified beta aggregate and stays marked <code>BETA</code>.
+> If nothing usable is available, the value remains <code>N/A</code>.
 
 | GPU | Core | HotSpot | VRAM temperature | Profile status |
 |---|:---:|:---:|:---:|---|
@@ -87,9 +88,10 @@ profile.[^sensor-availability]
 | GeForce RTX 3080 | Yes | Validated | Validated | Validated |
 | GeForce RTX 4060 | Yes | Validated | Board-dependent | Validated |
 | GeForce RTX 4090 | Yes | Validated | Under validation | HotSpot validated |
-| GeForce RTX 5050 | Yes | Beta[^rtx50] | Validated | Exact desktop profile |
-| GeForce RTX 5070 | Yes | Beta[^rtx50] | Yes on tested board | Experimental |
-| GeForce RTX 5070 Ti | Yes | Beta[^rtx50] | Yes on tested board | Experimental |
+| GeForce RTX 5050 | Yes | Beta[^rtx50] | Beta | GPC register HotSpot profile |
+| GeForce RTX 5060 Ti | Yes | Beta[^rtx50] | Beta | GPC register HotSpot profile |
+| GeForce RTX 5070 | Yes | Beta[^rtx50] | Beta | GPC register HotSpot profile |
+| GeForce RTX 5070 Ti | Yes | Beta[^rtx50] | Beta | GPC register HotSpot profile |
 | Other NVIDIA GPUs | Usually | Driver/board-dependent | Driver/board-dependent | Conservative fallback |
 
 See [SUPPORTED_GPUS.md](SUPPORTED_GPUS.md) for the user-facing support matrix.
@@ -103,7 +105,7 @@ If a measurement cannot be confirmed, GPU Shark leaves it unavailable.
 
 | Status | Direction |
 |---|---|
-| 🧪 Beta | Expand validated HotSpot telemetry for GeForce RTX 50-series cards; RTX 5050 is the first exact beta profile[^rtx50] |
+| 🧪 Beta | Expand RTX 50-series enhanced temperatures: register HotSpot plus the new beta Memory temperature channel[^rtx50] |
 | 🟡 In progress | Add more useful and correctly defined sensors |
 | 🔵 Planned | Rework and polish the GUI |
 | 🔵 Planned | Add Linux support |

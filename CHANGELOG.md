@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.2.4-beta.2
+
+- Rejected the LibreHardwareMonitor Hot Spot and Memory Temperature channels
+  on every GeForce RTX 50 card after a confirmed false RTX 5060 Ti reading
+  (HotSpot 34.1 C at Core 34.0 C). The remaining LibreHardwareMonitor
+  telemetry is unchanged.
+- Extended the read-only GPC register HotSpot reader, validated on the
+  desktop RTX 5050 (10DE:2D83), to the whole consumer RTX 50 lineup; the
+  register map also decodes correctly on RTX 5060 Ti (GB206).
+- Added a beta Memory Junction temperature channel from the private
+  ThermChannel slot that is the memory sensor on every captured Blackwell
+  board.
+- On boards without a same-board validated profile the HotSpot falls back to
+  an explicitly unverified beta aggregate and stays marked BETA; if no usable
+  value exists, GPU Shark keeps showing N/A.
+
 ## 0.2.4-beta.1
 
 - Added beta HotSpot support for the exact desktop GeForce RTX 5050
