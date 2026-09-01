@@ -26,6 +26,7 @@ enum Tab {
     Sensors,
     Settings,
     Feedback,
+    About,
 }
 
 #[derive(Clone, Copy)]
@@ -151,6 +152,7 @@ pub struct GpuSharkApp {
 
 impl GpuSharkApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        install_fonts(&cc.egui_ctx);
         let outcome = settings::load();
         let mut settings = outcome.settings;
         settings.autostart = crate::autostart::is_enabled();
@@ -224,6 +226,7 @@ impl GpuSharkApp {
                 (Tab::Sensors, Key::Sensors),
                 (Tab::Settings, Key::Settings),
                 (Tab::Feedback, Key::Feedback),
+                (Tab::About, Key::About),
             ] {
                 let active = self.tab == tab;
                 let text = RichText::new(self.language().text(key))
@@ -784,6 +787,41 @@ impl GpuSharkApp {
         });
     }
 
+    fn about_tab(&self, ui: &mut egui::Ui) {
+        let p = self.palette();
+        let language = self.language();
+        ui.add_space(28.0);
+        ui.allocate_ui(Vec2::new(480.0, ui.available_height()), |ui| {
+            ui.label(
+                RichText::new("GPU SHARK")
+                    .size(24.0)
+                    .strong()
+                    .color(p.graph),
+            );
+            ui.label(
+                RichText::new(format!("Version {}", env!("CARGO_PKG_VERSION")))
+                    .size(12.0)
+                    .color(p.muted),
+            );
+            ui.add_space(14.0);
+            ui.label(RichText::new(language.text(Key::AboutTagline)).color(p.text));
+            ui.add_space(8.0);
+            ui.label(RichText::new(language.text(Key::AboutReadOnly)).color(p.text));
+            ui.label(RichText::new(language.text(Key::AboutLicense)).color(p.text));
+            ui.add_space(14.0);
+            ui.separator();
+            ui.label(
+                RichText::new(if matches!(language, Language::Russian) {
+                    "Шрифт: Ubuntu — лицензия Ubuntu Font License (см. assets/fonts)."
+                } else {
+                    "Font: Ubuntu — Ubuntu Font License (see assets/fonts)."
+                })
+                .size(10.5)
+                .color(p.muted),
+            );
+        });
+    }
+
     fn start_feedback(&mut self, ctx: &egui::Context) {
         if self.feedback_sending {
             return;
@@ -827,6 +865,27 @@ impl GpuSharkApp {
     }
 }
 
+fn install_fonts(ctx: &egui::Context) {
+    let mut fonts = egui::FontDefinitions::empty();
+    fonts.font_data.insert(
+        "ubuntu_light".to_owned(),
+        std::sync::Arc::new(egui::FontData::from_static(include_bytes!(
+            "../assets/fonts/Ubuntu-Light.ttf"
+        ))),
+    );
+    fonts
+        .families
+        .entry(egui::FontFamily::Proportional)
+        .or_default()
+        .push("ubuntu_light".to_owned());
+    fonts
+        .families
+        .entry(egui::FontFamily::Monospace)
+        .or_default()
+        .push("ubuntu_light".to_owned());
+    ctx.set_fonts(fonts);
+}
+
 fn connect_message(language: UiLanguage) -> String {
     if language == UiLanguage::Russian {
         "Подключение к локальному источнику телеметрии…".into()
@@ -857,6 +916,7 @@ impl eframe::App for GpuSharkApp {
                 Tab::Sensors => self.sensors_tab(ui),
                 Tab::Settings => self.settings_tab(ui),
                 Tab::Feedback => self.feedback_tab(ui),
+                Tab::About => self.about_tab(ui),
             });
     }
 }

@@ -36,7 +36,7 @@ impl Language {
             (Self::Russian, Key::Dark) => "Тёмная",
             (Self::Russian, Key::ShowingMaximum) => "ПОКАЗАН МАКСИМУМ",
             (Self::Russian, Key::TrackAllMaxima) => "Максимумы для всех датчиков",
-            (Self::Russian, Key::Autostart) => "Автозапуск с системой",
+            (Self::Russian, Key::Autostart) => "Автозапуск при старте Windows",
             (Self::Russian, Key::Feedback) => "ОБРАТНАЯ СВЯЗЬ",
             (Self::Russian, Key::FeedbackPrivacy) => {
                 "В отчёт попадут только название GPU, публичные датчики и введённый вами текст."
@@ -86,7 +86,7 @@ impl Language {
             (Self::English, Key::Dark) => "Dark",
             (Self::English, Key::ShowingMaximum) => "SHOWING MAXIMUM",
             (Self::English, Key::TrackAllMaxima) => "Track maxima for all sensors",
-            (Self::English, Key::Autostart) => "Start with Windows",
+            (Self::English, Key::Autostart) => "Autorun on Windows start",
             (Self::English, Key::Feedback) => "FEEDBACK",
             (Self::English, Key::FeedbackPrivacy) => {
                 "The report includes only the GPU name, public sensors, and the text you enter."
