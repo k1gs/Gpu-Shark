@@ -287,7 +287,7 @@ impl GpuSharkApp {
             let item = metadata(sensor);
             let id = item.id.clone();
             let selected = self.history.selected_id() == Some(&id);
-            let tracked = selected && self.history.shows_maximum();
+            let tracked = self.history.is_tracked(&id);
             let (rect, response) =
                 ui.allocate_exact_size(Vec2::new(width, ROW_HEIGHT), Sense::click());
             let fill = if selected {
@@ -304,40 +304,39 @@ impl GpuSharkApp {
                 [rect.left_bottom(), rect.right_bottom()],
                 Stroke::new(1.0, p.divider.gamma_multiply(0.7)),
             );
-            let name_x = rect.left() + TABLE_MARGIN + if tracked { 38.0 } else { 0.0 };
             painter.text(
-                egui::pos2(name_x, rect.center().y),
+                egui::pos2(rect.left() + TABLE_MARGIN, rect.center().y),
                 Align2::LEFT_CENTER,
                 &sensor.name,
                 font.clone(),
                 p.text,
             );
-            if tracked {
-                painter.text(
-                    egui::pos2(rect.left() + 6.0, rect.center().y),
-                    Align2::LEFT_CENTER,
-                    "MAX",
-                    FontId::monospace(9.0),
-                    p.graph,
-                );
-            }
+            let value_x = rect.left() + ((width - 200.0).max(240.0) * 0.55) + TABLE_MARGIN;
             painter.text(
-                egui::pos2(rect.right() - SPARK_WIDTH - 22.0, rect.center().y),
-                Align2::RIGHT_CENTER,
+                egui::pos2(value_x, rect.center().y),
+                Align2::LEFT_CENTER,
                 sensor_value(sensor),
                 font,
-                if tracked {
-                    p.graph
-                } else {
-                    sensor_color(sensor, p)
-                },
+                sensor_color(sensor, p),
             );
+            let spark = Rect::from_min_size(
+                egui::pos2(rect.right() - SPARK_WIDTH - 8.0, rect.center().y - 9.0),
+                Vec2::new(SPARK_WIDTH, 18.0),
+            );
+            let samples = self.history.row_samples(&id);
+            let unit = sensor.unit.trim();
+            if tracked {
+                if let Some(stats) = self.history.row_stats(&id) {
+                    painter.text(
+                        egui::pos2(spark.left() - 14.0, rect.center().y),
+                        Align2::RIGHT_CENTER,
+                        format!("{:.1}", stats.max),
+                        FontId::monospace(11.0),
+                        p.graph,
+                    );
+                }
+            }
             if item.graphable {
-                let spark = Rect::from_min_size(
-                    egui::pos2(rect.right() - SPARK_WIDTH - 8.0, rect.center().y - 9.0),
-                    Vec2::new(SPARK_WIDTH, 18.0),
-                );
-                let samples = self.history.row_samples(&id);
                 sparkline(painter, spark, &samples, p.graph);
             }
             if response.double_clicked() {
@@ -349,7 +348,30 @@ impl GpuSharkApp {
                     self.history.select(sensor);
                 }
             }
-            let _ = response.on_hover_text(sensor_tooltip(item.kind, self.language()));
+            let mut tooltip = String::from(sensor_tooltip(item.kind, self.language()));
+            if let Some(stats) = self.history.row_stats(&id) {
+                let language = self.language();
+                tooltip.push_str(&format!(
+                    "\n{:.1} {unit} · {} {:.1} · {} {:.1} · {} {:.1}",
+                    stats.current,
+                    language.text(Key::Min),
+                    stats.min,
+                    language.text(Key::Avg),
+                    stats.avg,
+                    language.text(Key::Max),
+                    stats.max,
+                ));
+            }
+            if let Some(pointer) = response.hover_pos() {
+                if spark.contains(pointer) && samples.len() >= 2 {
+                    let fraction = ((pointer.x - spark.left()) / spark.width()).clamp(0.0, 1.0);
+                    let index = (fraction * (samples.len() - 1) as f32).round() as usize;
+                    if let Some(value) = samples.get(index) {
+                        tooltip = format!("{:.1} {unit}\n{tooltip}", value);
+                    }
+                }
+            }
+            let _ = response.on_hover_text(tooltip);
         }
         if sensors.is_empty() {
             ui.label(
@@ -371,6 +393,7 @@ impl GpuSharkApp {
             return;
         };
         ui.add_space(8.0);
+        let tracked = self.history.is_tracked(&selected_id);
         ui.horizontal(|ui| {
             ui.vertical(|ui| {
                 ui.label(
@@ -379,15 +402,23 @@ impl GpuSharkApp {
                         .strong()
                         .color(p.text),
                 );
+                let shown = if tracked {
+                    self.history
+                        .row_stats(&selected_id)
+                        .map(|stats| stats.max)
+                        .unwrap_or(sensor.value)
+                } else {
+                    sensor.value
+                };
                 ui.label(
-                    RichText::new(sensor_value(sensor))
+                    RichText::new(format!("{:.1} {}", shown, sensor.unit.trim()))
                         .size(22.0)
                         .strong()
                         .color(sensor_color(sensor, p)),
                 );
             });
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if self.history.shows_maximum() {
+                if tracked {
                     ui.label(
                         RichText::new(language.text(Key::ShowingMaximum))
                             .size(10.5)
@@ -402,16 +433,29 @@ impl GpuSharkApp {
             ui.label(RichText::new(language.text(Key::PerfCapNoGraph)).color(p.muted));
             return;
         }
-        let stats = self.history.stats().unwrap_or(SensorStats {
-            current: sensor.value,
-            min: sensor.value,
-            max: sensor.value,
-        });
+        let stats = self
+            .history
+            .row_stats(&selected_id)
+            .unwrap_or(SensorStats::initial(sensor.value));
         ui.horizontal(|ui| {
+            metric_chip(
+                ui,
+                language.text(Key::Current),
+                stats.current,
+                &sensor.unit,
+                p.text,
+            );
             metric_chip(
                 ui,
                 language.text(Key::Min),
                 stats.min,
+                &sensor.unit,
+                p.muted,
+            );
+            metric_chip(
+                ui,
+                language.text(Key::Avg),
+                stats.avg,
                 &sensor.unit,
                 p.muted,
             );
@@ -423,7 +467,13 @@ impl GpuSharkApp {
                 p.graph,
             );
         });
-        graph(ui, &self.history.samples(), stats, p);
+        graph(
+            ui,
+            &self.history.row_samples(&selected_id),
+            stats,
+            &sensor.unit,
+            p,
+        );
     }
 
     fn sensors_bottom_bar(&mut self, ui: &mut egui::Ui, info: &SysInfo) {
@@ -919,8 +969,9 @@ fn sparkline(painter: &egui::Painter, rect: Rect, samples: &[f32], color: Color3
     painter.add(egui::Shape::line(points, Stroke::new(1.5, color)));
 }
 
-fn graph(ui: &mut egui::Ui, samples: &[f32], stats: SensorStats, p: Palette) {
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 128.0), Sense::hover());
+fn graph(ui: &mut egui::Ui, samples: &[f32], stats: SensorStats, unit: &str, p: Palette) {
+    let (rect, response) =
+        ui.allocate_exact_size(Vec2::new(ui.available_width(), 128.0), Sense::hover());
     ui.painter().rect_filled(rect, 6.0, p.plot_bg);
     let plot = rect.shrink2(Vec2::new(12.0, 18.0));
     for step in 0..=4 {
@@ -970,6 +1021,33 @@ fn graph(ui: &mut egui::Ui, samples: &[f32], stats: SensorStats, p: Palette) {
         .collect();
     ui.painter()
         .add(egui::Shape::line(points, Stroke::new(2.2, p.graph)));
+    let mut hovered = None;
+    if let Some(pointer) = response.hover_pos() {
+        if plot.contains(pointer) {
+            let fraction = ((pointer.x - plot.left()) / plot.width()).clamp(0.0, 1.0);
+            let index = (fraction * (samples.len() - 1) as f32).round() as usize;
+            if let Some(value) = samples.get(index) {
+                let x = egui::lerp(
+                    plot.left()..=plot.right(),
+                    index as f32 / (samples.len() - 1) as f32,
+                );
+                let y = egui::lerp(
+                    plot.bottom()..=plot.top(),
+                    ((*value - lower) / span).clamp(0.0, 1.0),
+                );
+                ui.painter().line_segment(
+                    [egui::pos2(x, plot.top()), egui::pos2(x, plot.bottom())],
+                    Stroke::new(1.0, p.divider),
+                );
+                ui.painter().circle_filled(egui::pos2(x, y), 3.5, p.graph);
+                hovered = Some(*value);
+            }
+        }
+    }
+    let _ = match hovered {
+        Some(value) => response.on_hover_text(format!("{value:.1} {unit}")),
+        None => response,
+    };
 }
 
 fn metric_chip(ui: &mut egui::Ui, label: &str, value: f32, unit: &str, color: Color32) {

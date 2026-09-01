@@ -1,6 +1,6 @@
 use crate::sensor_model::{SensorId, metadata, sensor_id};
 use gpu_shark::SensorReading;
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 const ROW_SAMPLE_LIMIT: usize = 120;
 
@@ -9,59 +9,100 @@ pub struct SensorStats {
     pub current: f32,
     pub min: f32,
     pub max: f32,
+    #[allow(dead_code)]
+    pub avg: f32,
+}
+
+impl SensorStats {
+    #[allow(dead_code)]
+    pub fn initial(value: f32) -> Self {
+        Self {
+            current: value,
+            min: value,
+            max: value,
+            avg: value,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+struct RowRecord {
+    samples: VecDeque<f32>,
+    min: f32,
+    max: f32,
+    sum: f64,
+    count: u64,
+}
+
+impl RowRecord {
+    fn push(&mut self, value: f32) {
+        if self.samples.is_empty() {
+            self.min = value;
+            self.max = value;
+        }
+        self.samples.push_back(value);
+        while self.samples.len() > ROW_SAMPLE_LIMIT {
+            self.samples.pop_front();
+        }
+        self.min = self.min.min(value);
+        self.max = self.max.max(value);
+        self.sum += f64::from(value);
+        self.count += 1;
+    }
+
+    fn stats(&self) -> Option<SensorStats> {
+        let current = *self.samples.back()?;
+        let avg = if self.count > 0 {
+            (self.sum / self.count as f64) as f32
+        } else {
+            current
+        };
+        Some(SensorStats {
+            current,
+            min: self.min,
+            max: self.max,
+            avg,
+        })
+    }
 }
 
 #[derive(Default)]
 pub struct SensorHistory {
     selected: Option<SensorId>,
-    stats: Option<SensorStats>,
-    samples: VecDeque<f32>,
-    show_maximum: bool,
-    rows: HashMap<SensorId, VecDeque<f32>>,
+    tracked: HashSet<SensorId>,
+    rows: HashMap<SensorId, RowRecord>,
 }
 
 impl SensorHistory {
     pub fn select(&mut self, sensor: &SensorReading) {
-        let id = sensor_id(sensor);
-        self.show_maximum = false;
-        if !metadata(sensor).graphable {
-            self.selected = Some(id);
-            self.stats = None;
-            self.samples.clear();
-            return;
-        }
-        if self.selected.as_ref() != Some(&id) {
-            self.selected = Some(id);
-            self.stats = Some(SensorStats {
-                current: sensor.value,
-                min: sensor.value,
-                max: sensor.value,
-            });
-            self.samples.clear();
-            self.samples.push_back(sensor.value);
-        }
-    }
-
-    pub fn select_maximum(&mut self, sensor: &SensorReading) {
-        let id = sensor_id(sensor);
-        if self.selected.as_ref() == Some(&id) && self.show_maximum {
-            self.show_maximum = false;
-            return;
-        }
-        self.select(sensor);
-        self.show_maximum = metadata(sensor).graphable;
+        self.selected = Some(sensor_id(sensor));
     }
 
     #[allow(dead_code)]
     pub fn clear_selection(&mut self) {
         self.selected = None;
-        self.stats = None;
-        self.samples.clear();
-        self.show_maximum = false;
     }
 
+    /// Double-click toggles per-sensor maximum tracking. Tracked sensors keep
+    /// their session maximum visible and recorded independently of selection.
+    pub fn select_maximum(&mut self, sensor: &SensorReading) {
+        let id = sensor_id(sensor);
+        if metadata(sensor).graphable && !self.tracked.remove(&id) {
+            self.tracked.insert(id.clone());
+        }
+        self.selected = Some(id);
+    }
+
+    #[allow(dead_code)]
+    pub fn is_tracked(&self, id: &SensorId) -> bool {
+        self.tracked.contains(id)
+    }
+
+    #[allow(dead_code)]
     pub fn shows_maximum(&self) -> bool {
-        self.show_maximum
+        self.selected
+            .as_ref()
+            .is_some_and(|selected| self.tracked.contains(selected))
     }
 
     pub fn selected_id(&self) -> Option<&SensorId> {
@@ -73,61 +114,40 @@ impl SensorHistory {
             if !metadata(sensor).graphable {
                 continue;
             }
-            let row = self.rows.entry(sensor_id(sensor)).or_default();
-            row.push_back(sensor.value);
-            while row.len() > ROW_SAMPLE_LIMIT {
-                row.pop_front();
-            }
+            self.rows
+                .entry(sensor_id(sensor))
+                .or_default()
+                .push(sensor.value);
         }
-        let Some(selected) = self.selected.as_ref() else {
-            return;
-        };
-        let Some(sensor) = sensors.iter().find(|sensor| sensor_id(sensor) == *selected) else {
-            return;
-        };
-        if !metadata(sensor).graphable {
-            self.stats = None;
-            self.samples.clear();
-            return;
-        }
-        let stats = self.stats.get_or_insert(SensorStats {
-            current: sensor.value,
-            min: sensor.value,
-            max: sensor.value,
-        });
-        stats.current = sensor.value;
-        stats.min = stats.min.min(sensor.value);
-        stats.max = stats.max.max(sensor.value);
-        self.samples.push_back(sensor.value);
-        while self.samples.len() > 120 {
-            self.samples.pop_front();
-        }
-    }
-
-    pub fn stats(&self) -> Option<SensorStats> {
-        self.stats
-    }
-
-    pub fn samples(&self) -> Vec<f32> {
-        self.samples.iter().copied().collect()
     }
 
     #[allow(dead_code)]
-    pub fn row_samples(&self, id: &SensorId) -> Vec<f32> {
-        self.rows
-            .get(id)
-            .map(|row| row.iter().copied().collect())
+    pub fn stats(&self) -> Option<SensorStats> {
+        self.selected_id().and_then(|id| self.row_stats(id))
+    }
+
+    #[allow(dead_code)]
+    pub fn samples(&self) -> Vec<f32> {
+        self.selected_id()
+            .map(|id| self.row_samples(id))
             .unwrap_or_default()
     }
 
+    pub fn row_samples(&self, id: &SensorId) -> Vec<f32> {
+        self.rows
+            .get(id)
+            .map(|row| row.samples.iter().copied().collect())
+            .unwrap_or_default()
+    }
+
+    pub fn row_stats(&self, id: &SensorId) -> Option<SensorStats> {
+        self.rows.get(id).and_then(|row| row.stats())
+    }
+
+    /// Clears every recorded row and tracking state. Selection is preserved.
     pub fn reset(&mut self) {
         self.rows.clear();
-        if let Some(stats) = &mut self.stats {
-            stats.min = stats.current;
-            stats.max = stats.current;
-            self.samples.clear();
-            self.samples.push_back(stats.current);
-        }
+        self.tracked.clear();
     }
 }
 
@@ -143,56 +163,31 @@ mod tests {
         }
     }
 
-    #[test]
-    fn history_survives_a_known_provider_alias_change() {
-        let mut history = SensorHistory::default();
-        history.select(&reading("GPU Core", 40.0));
-        history.record(&[reading("GPU Core Temperature", 52.0)]);
-
-        let stats = history.stats().expect("selected sensor stats");
-        assert_eq!(stats.current, 52.0);
-        assert_eq!(stats.min, 40.0);
-        assert_eq!(stats.max, 52.0);
-        assert_eq!(history.samples(), vec![40.0, 52.0]);
-    }
-
-    #[test]
-    fn maximum_mode_and_reset_follow_double_click_semantics() {
-        let mut history = SensorHistory::default();
-        history.select_maximum(&reading("GPU Core", 40.0));
-        history.record(&[reading("GPU Core", 55.0)]);
-        history.record(&[reading("GPU Core", 48.0)]);
-
-        assert!(history.shows_maximum());
-        assert_eq!(history.stats().expect("tracked stats").max, 55.0);
-
-        history.reset();
-        let reset = history.stats().expect("reset stats");
-        assert_eq!(reset.current, 48.0);
-        assert_eq!(reset.min, 48.0);
-        assert_eq!(reset.max, 48.0);
-        assert_eq!(history.samples(), vec![48.0]);
-    }
-    #[test]
-    fn categorical_perfcap_selection_has_no_numeric_history() {
-        let perfcap = SensorReading {
+    fn perfcap_reading() -> SensorReading {
+        SensorReading {
             name: "PerfCap Reason".to_owned(),
             value: 0.0,
             unit: "Pwr, VRel".to_owned(),
-        };
-        let mut history = SensorHistory::default();
-
-        history.select_maximum(&perfcap);
-        history.record(std::slice::from_ref(&perfcap));
-
-        assert_eq!(history.selected_id(), Some(&sensor_id(&perfcap)));
-        assert!(!history.shows_maximum());
-        assert!(history.stats().is_none());
-        assert!(history.samples().is_empty());
+        }
     }
 
     #[test]
-    fn row_sparklines_record_every_graphable_sensor_and_reset_clears() {
+    fn history_survives_a_known_provider_alias_change() {
+        let mut history = SensorHistory::default();
+        history.record(&[reading("GPU Core", 40.0)]);
+        history.record(&[reading("GPU Core Temperature", 52.0)]);
+
+        let id = sensor_id(&reading("GPU Core", 40.0));
+        let stats = history.row_stats(&id).expect("merged alias stats");
+        assert_eq!(stats.current, 52.0);
+        assert_eq!(stats.min, 40.0);
+        assert_eq!(stats.max, 52.0);
+        assert_eq!(stats.avg, 46.0);
+        assert_eq!(history.row_samples(&id), vec![40.0, 52.0]);
+    }
+
+    #[test]
+    fn per_sensor_history_persists_across_selection_changes() {
         let core = reading("GPU Core", 40.0);
         let fan = SensorReading {
             name: "GPU Fan 1".to_owned(),
@@ -200,40 +195,79 @@ mod tests {
             unit: "RPM".to_owned(),
         };
         let mut history = SensorHistory::default();
+        history.select(&core);
         history.record(&[core.clone(), fan.clone()]);
         history.record(&[reading("GPU Core", 41.0)]);
+        history.select(&fan);
 
-        assert_eq!(history.row_samples(&sensor_id(&core)), vec![40.0, 41.0]);
-        assert_eq!(history.row_samples(&sensor_id(&fan)), vec![1000.0]);
-        assert!(
-            history
-                .row_samples(&sensor_id(&perfcap_reading()))
-                .is_empty()
+        assert_eq!(history.selected_id(), Some(&sensor_id(&fan)));
+        assert_eq!(
+            history.row_samples(&sensor_id(&core)),
+            vec![40.0, 41.0],
+            "switching selection must not clear another sensor's history"
         );
-
-        history.reset();
-        assert!(history.row_samples(&sensor_id(&core)).is_empty());
+        assert_eq!(
+            history.row_stats(&sensor_id(&fan)).expect("fan stats").min,
+            1000.0
+        );
     }
 
     #[test]
-    fn double_click_toggles_maximum_tracking() {
+    fn maximum_tracking_is_independent_of_selection() {
+        let core = reading("GPU Core", 40.0);
+        let fan = SensorReading {
+            name: "GPU Fan 1".to_owned(),
+            value: 1_000.0,
+            unit: "RPM".to_owned(),
+        };
         let mut history = SensorHistory::default();
-        history.select_maximum(&reading("GPU Core", 40.0));
-        assert!(history.shows_maximum());
+        history.select_maximum(&core);
+        history.record(&[core.clone()]);
+        history.select(&fan);
 
-        history.select_maximum(&reading("GPU Core", 45.0));
-        assert!(!history.shows_maximum());
-        assert_eq!(
-            history.selected_id(),
-            Some(&sensor_id(&reading("GPU Core", 44.0)))
+        assert!(
+            history.is_tracked(&sensor_id(&core)),
+            "tracking must survive switching to another sensor"
         );
+        assert_eq!(history.row_stats(&sensor_id(&core)).unwrap().max, 40.0);
+
+        history.select_maximum(&fan);
+        assert!(history.is_tracked(&sensor_id(&fan)));
+
+        history.select_maximum(&core);
+        assert!(
+            !history.is_tracked(&sensor_id(&core)),
+            "double-click on a tracked sensor removes its tracking"
+        );
+        assert!(history.is_tracked(&sensor_id(&fan)));
     }
 
-    fn perfcap_reading() -> SensorReading {
-        SensorReading {
-            name: "PerfCap Reason".to_owned(),
-            value: 0.0,
-            unit: "Pwr, VRel".to_owned(),
-        }
+    #[test]
+    fn categorical_perfcap_selection_has_no_numeric_history() {
+        let perfcap = perfcap_reading();
+        let mut history = SensorHistory::default();
+
+        history.select_maximum(&perfcap);
+        history.record(std::slice::from_ref(&perfcap));
+
+        assert_eq!(history.selected_id(), Some(&sensor_id(&perfcap)));
+        assert!(!history.is_tracked(&sensor_id(&perfcap)));
+        assert!(history.row_stats(&sensor_id(&perfcap)).is_none());
+        assert!(history.row_samples(&sensor_id(&perfcap)).is_empty());
+    }
+
+    #[test]
+    fn reset_clears_rows_and_tracking_but_keeps_selection() {
+        let core = reading("GPU Core", 48.0);
+        let mut history = SensorHistory::default();
+        history.select_maximum(&core);
+        history.record(&[core.clone()]);
+
+        history.reset();
+
+        assert_eq!(history.selected_id(), Some(&sensor_id(&core)));
+        assert!(!history.is_tracked(&sensor_id(&core)));
+        assert!(history.row_stats(&sensor_id(&core)).is_none());
+        assert!(history.row_samples(&sensor_id(&core)).is_empty());
     }
 }

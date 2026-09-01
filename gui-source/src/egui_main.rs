@@ -12,8 +12,8 @@ mod settings;
 fn main() -> eframe::Result {
     let viewport = eframe::egui::ViewportBuilder::default()
         .with_title(format!("GPU Shark {}", env!("CARGO_PKG_VERSION")))
-        .with_inner_size([1120.0, 720.0])
-        .with_min_inner_size([880.0, 560.0])
+        .with_inner_size([920.0, 600.0])
+        .with_min_inner_size([760.0, 500.0])
         .with_resizable(true)
         .with_maximize_button(false)
         .with_minimize_button(true);

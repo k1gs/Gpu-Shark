@@ -454,6 +454,7 @@ fn draw_selected_panel(
         current: sensor.value,
         min: sensor.value,
         max: sensor.value,
+        avg: sensor.value,
     });
     let previous = unsafe { SelectObject(hdc, bold_font) };
     text(
