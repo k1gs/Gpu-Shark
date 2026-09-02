@@ -13,13 +13,14 @@ use windows_sys::Win32::Graphics::Gdi::{
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    AdjustWindowRectEx, BN_CLICKED, BS_PUSHBUTTON, CB_ADDSTRING, CB_GETCURSEL, CB_SETCURSEL,
-    CBS_DROPDOWNLIST, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, CreateWindowExW, DefWindowProcW,
-    DestroyWindow, GW_OWNER, GetClientRect, GetWindow, ICON_SMALL, IDC_ARROW, IDI_APPLICATION,
-    LoadCursorW, LoadIconW, MoveWindow, RegisterClassW, SW_RESTORE, SWP_NOACTIVATE, SWP_NOZORDER,
-    SendMessageW, SetForegroundWindow, SetWindowPos, SetWindowTextW, ShowWindow, WM_CLOSE,
-    WM_COMMAND, WM_CREATE, WM_CTLCOLORSTATIC, WM_DESTROY, WM_DPICHANGED, WM_SETFONT, WM_SETICON,
-    WNDCLASSW, WS_CAPTION, WS_CHILD, WS_SYSMENU, WS_TABSTOP, WS_VISIBLE, WS_VSCROLL,
+    AdjustWindowRectEx, BM_GETCHECK, BM_SETCHECK, BN_CLICKED, BS_AUTOCHECKBOX, BS_PUSHBUTTON,
+    CB_ADDSTRING, CB_GETCURSEL, CB_SETCURSEL, CBS_DROPDOWNLIST, CS_HREDRAW, CS_VREDRAW,
+    CW_USEDEFAULT, CreateWindowExW, DefWindowProcW, DestroyWindow, GW_OWNER, GetClientRect,
+    GetWindow, ICON_SMALL, IDC_ARROW, IDI_APPLICATION, LoadCursorW, LoadIconW, MoveWindow,
+    RegisterClassW, SW_RESTORE, SWP_NOACTIVATE, SWP_NOZORDER, SendMessageW, SetForegroundWindow,
+    SetWindowPos, SetWindowTextW, ShowWindow, WM_CLOSE, WM_COMMAND, WM_CREATE, WM_CTLCOLORSTATIC,
+    WM_DESTROY, WM_DPICHANGED, WM_SETFONT, WM_SETICON, WNDCLASSW, WS_CAPTION, WS_CHILD, WS_SYSMENU,
+    WS_TABSTOP, WS_VISIBLE, WS_VSCROLL,
 };
 
 const CLASS_NAME: &str = "GpuSharkSettingsWindow";
@@ -35,6 +36,7 @@ static SETTINGS_WINDOW: AtomicIsize = AtomicIsize::new(0);
 static LANGUAGE_COMBO: AtomicIsize = AtomicIsize::new(0);
 static REFRESH_COMBO: AtomicIsize = AtomicIsize::new(0);
 static ACCENT_COMBO: AtomicIsize = AtomicIsize::new(0);
+static CHECK_UPDATES_BOX: AtomicIsize = AtomicIsize::new(0);
 static STATUS_LABEL: AtomicIsize = AtomicIsize::new(0);
 static BACKGROUND_BRUSH: AtomicIsize = AtomicIsize::new(0);
 static CONTROL_HANDLES: OnceLock<Mutex<Vec<HWND>>> = OnceLock::new();
@@ -202,6 +204,7 @@ unsafe extern "system" fn settings_wnd_proc(
                 LANGUAGE_COMBO.store(0, Ordering::Release);
                 REFRESH_COMBO.store(0, Ordering::Release);
                 ACCENT_COMBO.store(0, Ordering::Release);
+                CHECK_UPDATES_BOX.store(0, Ordering::Release);
                 STATUS_LABEL.store(0, Ordering::Release);
                 if let Some(handles) = CONTROL_HANDLES.get() {
                     if let Ok(mut handles) = handles.lock() {
@@ -308,9 +311,33 @@ unsafe fn create_controls(hwnd: HWND) {
                 SendMessageW(control, WM_SETFONT, font as usize, 1);
             }
         }
+        let checkbox = CreateWindowExW(
+            0,
+            wstr("BUTTON").as_ptr(),
+            wstr(if russian {
+                "Проверять обновления при запуске"
+            } else {
+                "Check for updates at startup"
+            })
+            .as_ptr(),
+            WS_CHILD | WS_VISIBLE | WS_TABSTOP | (BS_AUTOCHECKBOX as u32),
+            0,
+            0,
+            0,
+            0,
+            hwnd,
+            0,
+            instance,
+            std::ptr::null(),
+        );
+        CHECK_UPDATES_BOX.store(checkbox, Ordering::Release);
+        if checkbox != 0 {
+            SendMessageW(checkbox, WM_SETFONT, font as usize, 1);
+        }
         let handles = CONTROL_HANDLES.get_or_init(|| Mutex::new(Vec::new()));
         if let Ok(mut handles) = handles.lock() {
             *handles = controls;
+            handles.push(checkbox);
         }
         refresh_status_label();
     }
@@ -346,7 +373,7 @@ unsafe fn layout_controls(hwnd: HWND) {
             .and_then(|handles| handles.lock().ok())
             .map(|handles| handles.clone())
             .unwrap_or_default();
-        if children.len() < 12 {
+        if children.len() < 13 {
             return;
         }
         MoveWindow(children[0], sx(24), sy(18), sx(472), sy(28), 1);
@@ -357,10 +384,11 @@ unsafe fn layout_controls(hwnd: HWND) {
         MoveWindow(children[5], sx(220), sy(64), sx(276), sy(170), 1);
         MoveWindow(children[6], sx(220), sy(114), sx(276), sy(170), 1);
         MoveWindow(children[7], sx(220), sy(164), sx(276), sy(210), 1);
-        MoveWindow(children[8], sx(24), sy(260), sx(472), sy(40), 1);
+        MoveWindow(children[8], sx(24), sy(292), sx(472), sy(30), 1);
         MoveWindow(children[9], sx(24), sy(326), sx(180), sy(32), 1);
         MoveWindow(children[10], sx(292), sy(326), sx(96), sy(32), 1);
         MoveWindow(children[11], sx(400), sy(326), sx(96), sy(32), 1);
+        MoveWindow(children[12], sx(24), sy(254), sx(472), sy(30), 1);
     }
 }
 
@@ -392,6 +420,15 @@ unsafe fn populate_controls(settings: &AppSettings) {
             AccentTheme::Windows => 4,
         };
         SendMessageW(accent, CB_SETCURSEL, accent_index, 0);
+        let checkbox = CHECK_UPDATES_BOX.load(Ordering::Acquire);
+        if checkbox != 0 {
+            SendMessageW(
+                checkbox,
+                BM_SETCHECK,
+                usize::from(settings.check_updates),
+                0,
+            );
+        }
     }
 }
 
@@ -429,10 +466,13 @@ unsafe fn settings_from_controls() -> AppSettings {
             4 => AccentTheme::Windows,
             _ => AccentTheme::Green,
         };
+        let check_updates =
+            SendMessageW(CHECK_UPDATES_BOX.load(Ordering::Acquire), BM_GETCHECK, 0, 0) == 1;
         AppSettings {
             language,
             refresh_interval_ms,
             accent,
+            check_updates,
             ..AppSettings::default()
         }
     }

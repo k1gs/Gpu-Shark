@@ -39,6 +39,7 @@ pub struct AppSettings {
     pub refresh_interval_ms: u64,
     pub accent: AccentTheme,
     pub temperature_unit: TemperatureUnit,
+    pub check_updates: bool,
 }
 
 impl Default for AppSettings {
@@ -49,6 +50,7 @@ impl Default for AppSettings {
             refresh_interval_ms: 1_000,
             accent: AccentTheme::Green,
             temperature_unit: TemperatureUnit::Celsius,
+            check_updates: true,
         }
     }
 }

@@ -641,7 +641,29 @@ pub fn draw_feedback_form(
     );
 }
 
-pub fn draw_about(hdc: HDC, client: &RECT, icon: HICON, language: Language, version: &str) {
+pub const UPDATE_ACTION_HIT: RECT = RECT {
+    left: 214,
+    top: LIST_TOP + 312,
+    right: 620,
+    bottom: LIST_TOP + 348,
+};
+
+pub const UPDATE_PAGE_HIT: RECT = RECT {
+    left: 214,
+    top: LIST_TOP + 346,
+    right: 620,
+    bottom: LIST_TOP + 382,
+};
+
+pub fn draw_about(
+    hdc: HDC,
+    client: &RECT,
+    icon: HICON,
+    language: Language,
+    version: &str,
+    update: &crate::updates::UpdateStatus,
+    auto_check_enabled: bool,
+) {
     fill(
         hdc,
         &RECT {
@@ -689,6 +711,77 @@ pub fn draw_about(hdc: HDC, client: &RECT, icon: HICON, language: Language, vers
         MUTED,
     );
     text(hdc, 220, LIST_TOP + 262, "© 2026 k1gs", MUTED);
+    let (status_line, status_color) = match update {
+        crate::updates::UpdateStatus::Idle => {
+            if auto_check_enabled {
+                (String::new(), MUTED)
+            } else {
+                (language.text(Key::UpdateDisabled).to_owned(), MUTED)
+            }
+        }
+        crate::updates::UpdateStatus::Checking => {
+            (language.text(Key::UpdateChecking).to_owned(), MUTED)
+        }
+        crate::updates::UpdateStatus::UpToDate => {
+            (language.text(Key::UpdateUpToDate).to_owned(), LABEL)
+        }
+        crate::updates::UpdateStatus::Available { latest, .. } => (
+            format!("{} v{latest}", language.text(Key::UpdateAvailable)),
+            LABEL,
+        ),
+        crate::updates::UpdateStatus::Downloading => {
+            (language.text(Key::UpdateDownloading).to_owned(), MUTED)
+        }
+        crate::updates::UpdateStatus::ReadyToInstall { .. } => {
+            (language.text(Key::UpdateReady).to_owned(), LABEL)
+        }
+        crate::updates::UpdateStatus::InstallFailed { .. } => {
+            (language.text(Key::UpdateInstallFailed).to_owned(), AMBER)
+        }
+        crate::updates::UpdateStatus::Failed(_) => {
+            (language.text(Key::UpdateFailed).to_owned(), AMBER)
+        }
+    };
+    if !status_line.is_empty() {
+        text(hdc, 220, LIST_TOP + 284, &status_line, status_color);
+    }
+    let (action, action_color) = match update {
+        crate::updates::UpdateStatus::Available { .. }
+        | crate::updates::UpdateStatus::InstallFailed { .. } => {
+            (language.text(Key::UpdateInstall), accent())
+        }
+        crate::updates::UpdateStatus::ReadyToInstall { .. } => {
+            (language.text(Key::UpdateRestart), accent())
+        }
+        crate::updates::UpdateStatus::Checking | crate::updates::UpdateStatus::Downloading => {
+            (language.text(Key::UpdateChecking), MUTED)
+        }
+        _ => (language.text(Key::UpdateCheck), accent()),
+    };
+    text(hdc, 220, LIST_TOP + 318, action, action_color);
+    let page_url = match update {
+        crate::updates::UpdateStatus::Available { url, .. }
+        | crate::updates::UpdateStatus::ReadyToInstall { url, .. }
+        | crate::updates::UpdateStatus::InstallFailed { url, .. } => url,
+        _ => "",
+    };
+    if !page_url.is_empty() {
+        text(
+            hdc,
+            220,
+            LIST_TOP + 352,
+            language.text(Key::UpdateOpen),
+            accent(),
+        );
+    }
+    let detail = match update {
+        crate::updates::UpdateStatus::Failed(detail)
+        | crate::updates::UpdateStatus::InstallFailed { detail, .. } => detail.as_str(),
+        _ => "",
+    };
+    if !detail.is_empty() {
+        clipped(hdc, 220, LIST_TOP + 386, detail, MUTED, 560);
+    }
 }
 
 #[cfg(test)]

@@ -12,3 +12,5 @@ mod gui_view;
 mod sensor_model;
 #[path = "../src/settings.rs"]
 mod settings;
+#[path = "../src/updates.rs"]
+mod updates;

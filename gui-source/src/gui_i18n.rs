@@ -61,6 +61,20 @@ impl Language {
                 "Неизвестная видеокарта — отправьте отчёт через обратную связь."
             }
             (Self::Russian, Key::Unavailable) => "ТЕЛЕМЕТРИЯ НЕДОСТУПНА",
+            (Self::Russian, Key::UpdateCheck) => "Проверить обновления",
+            (Self::Russian, Key::UpdateChecking) => "Проверка обновлений…",
+            (Self::Russian, Key::UpdateAvailable) => "Доступна новая версия:",
+            (Self::Russian, Key::UpdateOpen) => "Открыть страницу загрузки",
+            (Self::Russian, Key::UpdateUpToDate) => "У вас последняя версия.",
+            (Self::Russian, Key::UpdateFailed) => "Не удалось проверить обновления.",
+            (Self::Russian, Key::UpdateInstall) => "Скачать и установить",
+            (Self::Russian, Key::UpdateRestart) => "Перезапустить и обновить",
+            (Self::Russian, Key::UpdateDownloading) => "Загрузка обновления…",
+            (Self::Russian, Key::UpdateReady) => "Обновление загружено и проверено.",
+            (Self::Russian, Key::UpdateInstallFailed) => "Не удалось установить обновление.",
+            (Self::Russian, Key::UpdateDisabled) => {
+                "Автопроверка обновлений отключена в настройках."
+            }
             (Self::English, Key::Sensors) => "SENSORS",
             (Self::English, Key::Selected) => "SELECTED SENSOR",
             (Self::English, Key::GpuActivity) => "GPU ACTIVITY",
@@ -97,6 +111,20 @@ impl Language {
             (Self::English, Key::Beta) => "BETA",
             (Self::English, Key::UnknownGpu) => "Unknown GPU — send a report through feedback.",
             (Self::English, Key::Unavailable) => "TELEMETRY UNAVAILABLE",
+            (Self::English, Key::UpdateCheck) => "Check for updates",
+            (Self::English, Key::UpdateChecking) => "Checking for updates…",
+            (Self::English, Key::UpdateAvailable) => "New version available:",
+            (Self::English, Key::UpdateOpen) => "Open the download page",
+            (Self::English, Key::UpdateUpToDate) => "You have the latest version.",
+            (Self::English, Key::UpdateFailed) => "Could not check for updates.",
+            (Self::English, Key::UpdateInstall) => "Download and install",
+            (Self::English, Key::UpdateRestart) => "Restart to update",
+            (Self::English, Key::UpdateDownloading) => "Downloading update…",
+            (Self::English, Key::UpdateReady) => "The update is downloaded and verified.",
+            (Self::English, Key::UpdateInstallFailed) => "Could not install the update.",
+            (Self::English, Key::UpdateDisabled) => {
+                "Automatic update checks are disabled in Settings."
+            }
         }
     }
 
@@ -246,4 +274,16 @@ pub enum Key {
     Beta,
     UnknownGpu,
     Unavailable,
+    UpdateCheck,
+    UpdateChecking,
+    UpdateAvailable,
+    UpdateOpen,
+    UpdateUpToDate,
+    UpdateFailed,
+    UpdateDisabled,
+    UpdateInstall,
+    UpdateRestart,
+    UpdateDownloading,
+    UpdateReady,
+    UpdateInstallFailed,
 }
