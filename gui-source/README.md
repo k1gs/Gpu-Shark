@@ -1,6 +1,6 @@
 # GPU Shark GUI source
 
-This directory contains the public Rust/Win32 GUI client. It includes rendering,
+This directory contains the public Rust/egui GUI client. It includes rendering,
 stable sensor identities and history, GPU-Z-compatible presentation of decoded
 NVIDIA PerfCap reasons, Russian and English UI strings, and the consent-based
 feedback client.

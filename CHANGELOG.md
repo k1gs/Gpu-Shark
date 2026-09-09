@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.2.5
+
+- Replaced the previous Win32/GDI dashboard with a modern resizable egui
+  interface while preserving the existing read-only telemetry architecture.
+- Added a compact sensor table with live sparklines, clearer temperature
+  highlighting and a persistent GPU status bar.
+- Added interactive per-sensor history, current/minimum/average/maximum
+  statistics, graph-point inspection and independent session maximum tracking.
+- Added persistent light and dark themes, accent selection, interface language,
+  telemetry refresh interval and maximum-tracking settings.
+- Added optional Windows startup integration without weakening the required
+  administrator manifest.
+- Reworked the Settings, Feedback and About views for the new interface and
+  retained the existing consent-based privacy boundary.
+- Added optional update checks at startup and explicit one-click installation
+  of SHA-256-verified GitHub release packages.
+- Kept LibreHardwareMonitor Hot Spot readings disabled on GeForce RTX 50-series
+  cards. RTX 50 HotSpot now comes only from the read-only native GPC-register
+  provider; no Core or Memory value is used as a substitute.
+- Kept unverified RTX 50 register HotSpot readings marked BETA and left the
+  reading unavailable when the native provider cannot obtain a usable value.
+- Fixed update download limits, WinHTTP resource cleanup, archive-path escaping
+  and restart failure handling.
+- Fixed GPU name and RESET controls being clipped below the sensor table.
+- Restored complete English and Russian localization after the GUI migration.
+
 ## 0.2.4-beta.3
 
 - Added automatic update checks: one anonymous HTTPS request to the public

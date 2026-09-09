@@ -19,6 +19,6 @@ imply that every board variant exposes the same sensors.
 | GeForce RTX 5070 Ti | Yes | Beta | Beta | GPC register HotSpot profile |
 | Other NVIDIA GPUs | Usually | Driver-dependent | Driver/board-dependent | Conservative fallback |
 
-When a value cannot be validated, GPU Shark displays `N/A`. This is intentional.
+When a value cannot be validated, GPU Shark leaves it unavailable. This is intentional.
 Open an issue with the exact GPU model, board vendor, driver version and VBIOS
 version if a sensor that should exist is missing.

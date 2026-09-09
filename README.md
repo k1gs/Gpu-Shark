@@ -19,8 +19,8 @@
 > GPU Shark is strictly read-only. It does not change clocks, voltage, firmware
 > or fan control, and it does not install a kernel driver.
 
-GPU Shark is a lightweight Win32 application with no heavyweight GUI framework
-and no silent background network telemetry. It shows only
+GPU Shark is a native Windows desktop application built with Rust and egui,
+without a browser or web runtime and without silent background telemetry. It shows only
 measurements that the hardware and driver actually expose; unavailable sensors
 stay hidden instead of being replaced with guessed values.[^sensor-availability]
 
@@ -30,7 +30,7 @@ stay hidden instead of being replaced with guessed values.[^sensor-availability]
 
 | Native and lightweight | Honest telemetry | Useful during a test |
 |---|---|---|
-| Fast Win32 interface and a portable official single EXE | Core, HotSpot and VRAM are never substituted for one another | Live history, session maximums and GPU-Z-compatible PerfCap reasons |
+| Resizable desktop interface and a portable official single EXE | Core, HotSpot and VRAM are never substituted for one another | Live history, session maximums and GPU-Z-compatible PerfCap reasons |
 | Compact live sensor dashboard | Exact enhanced thermal mappings are enabled only for validated PCI profiles | Separate fan, power, voltage, activity and system readings when exposed |
 
 ### Highlights
@@ -44,18 +44,19 @@ stay hidden instead of being replaced with guessed values.[^sensor-availability]
 - Live graph for the selected sensor
 - Per-sensor maximum tracking, enabled by double-clicking a sensor row
 - Persistent language, refresh interval and accent settings
+- Persistent light and dark themes and optional Windows startup
 - Localized About view with the project logo and application version
 - Consent-based feedback form with no automatic submission
-- Fixed landscape layout with flicker-free double-buffered drawing
+- Optional update checks and explicit SHA-256-verified installation
 
-### Native interface
+### Desktop interface
 
 <div align="center">
   <img src="materials/Screenshot1.png" alt="GPU Shark interface view" width="100%" />
 </div>
 
-The interface keeps the live readings, settings, About information and
-consent-based feedback in one compact native Win32 application.
+The interface keeps live readings, settings, About information and
+consent-based feedback in one compact resizable desktop application.
 
 > [!NOTE]
 > GPU Shark never invents a HotSpot value from Core, Memory or an unrelated
@@ -72,11 +73,11 @@ profile.[^sensor-availability]
 > [!WARNING]
 > GeForce RTX 50-series enhanced temperatures are **beta**. GPU Shark rejects
 > the LibreHardwareMonitor Hot Spot and Memory Temperature channels on every
-> GeForce RTX 50 card — they were confirmed to publish Core-like or missing
-> values — and reads HotSpot through a read-only GPC register path instead.
-> On boards without a same-board validated profile the reading falls back to
-> an explicitly unverified beta aggregate and stays marked <code>BETA</code>.
-> If nothing usable is available, the value remains <code>N/A</code>.
+> GeForce RTX 50 card because they were confirmed to publish Core-like,
+> unrelated or missing values. HotSpot comes only from the read-only native
+> GPC-register provider. Unverified register readings stay marked
+> <code>BETA</code>; Core or Memory is never substituted for HotSpot. If the
+> native provider has no usable value, the HotSpot row remains unavailable.
 
 | GPU | Core | HotSpot | VRAM temperature | Profile status |
 |---|:---:|:---:|:---:|---|
@@ -161,7 +162,7 @@ name or private hardware diagnostics.
 
 ## Build the public GUI
 
-The public Rust/Win32 GUI source is in [gui-source/](gui-source/). The managed
+The public Rust/egui GUI source is in [gui-source/](gui-source/). The managed
 and native telemetry-provider implementations are intentionally not published.
 Matching public runtime DLLs are supplied through the
 <code>GPU-Shark-gui-runtime-win-x64.zip</code> release asset.[^official-build]
