@@ -50,6 +50,7 @@ pub struct AppSettings {
     pub temperature_unit: TemperatureUnit,
     pub track_all_maxima: bool,
     pub autostart: bool,
+    pub check_updates: bool,
 }
 
 impl Default for AppSettings {
@@ -63,6 +64,7 @@ impl Default for AppSettings {
             temperature_unit: TemperatureUnit::Celsius,
             track_all_maxima: true,
             autostart: false,
+            check_updates: true,
         }
     }
 }

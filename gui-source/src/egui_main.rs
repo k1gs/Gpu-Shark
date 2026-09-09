@@ -9,6 +9,7 @@ mod gui_i18n;
 mod gui_state;
 mod sensor_model;
 mod settings;
+mod updates;
 
 fn main() -> eframe::Result {
     let viewport = eframe::egui::ViewportBuilder::default()

@@ -52,7 +52,7 @@ pub fn metadata(sensor: &SensorReading) -> SensorMetadata {
         SensorKind::PerfCap
     } else if lower.contains("fan") && unit == "rpm" {
         SensorKind::Fan
-    } else if clock && lower.contains("memory clock") {
+    } else if clock && (lower.contains("memory clock") || lower == "gpu memory") {
         SensorKind::MemoryClock
     } else if clock && (lower.contains("gpu clock") || lower.contains("gpu core clock")) {
         SensorKind::GpuClock
@@ -184,6 +184,9 @@ mod tests {
         let item = metadata(&reading("Memory Clock", "MHz"));
         assert_eq!(item.kind, SensorKind::MemoryClock);
         assert!(!item.visible);
+        let lhm_item = metadata(&reading("GPU Memory", "MHz"));
+        assert_eq!(lhm_item.kind, SensorKind::MemoryClock);
+        assert!(!lhm_item.visible);
     }
 
     #[test]

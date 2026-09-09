@@ -10,16 +10,131 @@ use gpu_shark::{
     SensorReading, SysInfo, dll_library_path, fetch_data_from_dll, load_driver_library,
 };
 use std::sync::{
-    Arc,
-    atomic::{AtomicU64, Ordering},
+    Arc, Mutex, OnceLock,
+    atomic::{AtomicBool, AtomicU64, Ordering},
     mpsc,
 };
 use std::{thread, time::Duration};
 use windows_sys::Win32::Graphics::Dwm::DwmGetColorizationColor;
+use windows_sys::Win32::UI::Shell::ShellExecuteW;
 
 const ROW_HEIGHT: f32 = 26.0;
 const SPARK_WIDTH: f32 = 64.0;
 const TABLE_MARGIN: f32 = 10.0;
+
+static UPDATE_STATUS: OnceLock<Mutex<crate::updates::UpdateStatus>> = OnceLock::new();
+static UPDATE_WORK_RUNNING: AtomicBool = AtomicBool::new(false);
+
+fn update_status_snapshot() -> crate::updates::UpdateStatus {
+    UPDATE_STATUS
+        .get()
+        .and_then(|slot| slot.lock().ok())
+        .map(|value| value.clone())
+        .unwrap_or(crate::updates::UpdateStatus::Idle)
+}
+
+fn store_update_status(status: crate::updates::UpdateStatus) {
+    if let Some(slot) = UPDATE_STATUS.get() {
+        if let Ok(mut value) = slot.lock() {
+            *value = status;
+        }
+    }
+}
+
+fn start_update_check(ctx: egui::Context) {
+    if UPDATE_WORK_RUNNING.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    store_update_status(crate::updates::UpdateStatus::Checking);
+    ctx.request_repaint();
+    thread::spawn(move || {
+        let status = match crate::updates::fetch_latest() {
+            Ok(release) => {
+                if crate::updates::is_newer(&release.tag_name, crate::updates::current_version()) {
+                    crate::updates::UpdateStatus::Available {
+                        latest: release.tag_name,
+                        url: release.html_url,
+                    }
+                } else {
+                    crate::updates::UpdateStatus::UpToDate
+                }
+            }
+            Err(error) => crate::updates::UpdateStatus::Failed(error),
+        };
+        store_update_status(status);
+        UPDATE_WORK_RUNNING.store(false, Ordering::Release);
+        ctx.request_repaint();
+    });
+}
+
+fn start_update_download(ctx: egui::Context) {
+    if UPDATE_WORK_RUNNING.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    store_update_status(crate::updates::UpdateStatus::Downloading);
+    ctx.request_repaint();
+    thread::spawn(move || {
+        let root = crate::updates::update_root().unwrap_or_else(|_| std::env::temp_dir());
+        let status = match crate::updates::prepare_install(&root) {
+            Ok(prepared) => crate::updates::UpdateStatus::ReadyToInstall {
+                exe_path: prepared.exe_path.display().to_string(),
+                url: prepared.page_url,
+            },
+            Err(detail) => crate::updates::UpdateStatus::InstallFailed {
+                detail,
+                url: String::new(),
+            },
+        };
+        store_update_status(status);
+        UPDATE_WORK_RUNNING.store(false, Ordering::Release);
+        ctx.request_repaint();
+    });
+}
+
+fn start_update_install(ctx: egui::Context, new_exe: String) {
+    if UPDATE_WORK_RUNNING.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    ctx.request_repaint();
+    thread::spawn(move || {
+        let result =
+            crate::updates::apply_prepared(std::path::Path::new(&new_exe)).and_then(|()| {
+                let current = std::env::current_exe()
+                    .map_err(|error| format!("Cannot locate updated executable: {error}"))?;
+                std::process::Command::new(current)
+                    .spawn()
+                    .map(|_| ())
+                    .map_err(|error| format!("Could not restart updated application: {error}"))
+            });
+        let success = result.is_ok();
+        if let Err(detail) = result {
+            store_update_status(crate::updates::UpdateStatus::InstallFailed {
+                detail,
+                url: String::new(),
+            });
+        }
+        UPDATE_WORK_RUNNING.store(false, Ordering::Release);
+        ctx.request_repaint();
+        if success {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        }
+    });
+}
+
+fn open_release_page(url: &str) {
+    let verb = crate::updates::wstr_public("open");
+    let file = crate::updates::wstr_public(url);
+    unsafe {
+        ShellExecuteW(
+            0,
+            verb.as_ptr(),
+            file.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            1,
+        );
+    }
+}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Tab {
@@ -154,9 +269,14 @@ pub struct GpuSharkApp {
 impl GpuSharkApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         install_fonts(&cc.egui_ctx);
+        crate::updates::cleanup_old_install();
+        let _ = UPDATE_STATUS.set(Mutex::new(crate::updates::UpdateStatus::Idle));
         let outcome = settings::load();
         let mut settings = outcome.settings;
         settings.autostart = crate::autostart::is_enabled();
+        if settings.check_updates {
+            start_update_check(cc.egui_ctx.clone());
+        }
         configure_style(&cc.egui_ctx, settings.theme, accent_color(settings.accent));
         let refresh_interval = Arc::new(AtomicU64::new(settings.refresh_interval_ms));
         let (telemetry_rx, worker) =
@@ -263,6 +383,14 @@ impl GpuSharkApp {
             self.unavailable(ui, &message);
             return;
         };
+        if let Some(error) = info
+            .error
+            .as_deref()
+            .filter(|error| !error.trim().is_empty())
+        {
+            self.unavailable(ui, error);
+            return;
+        }
         let sensors = ordered_sensors(&info);
         let detail_open = self
             .history
@@ -270,7 +398,7 @@ impl GpuSharkApp {
             .is_some_and(|selected| sensors.iter().any(|sensor| sensor_id(sensor) == *selected));
         let detail_height = if detail_open { 198.0 } else { 0.0 };
         let width = ui.available_width();
-        let table_height = (ui.available_height() - 48.0 - detail_height).max(160.0);
+        let table_height = (ui.available_height() - detail_height).max(160.0);
         ui.allocate_ui(Vec2::new(width, table_height), |ui| {
             egui::ScrollArea::vertical()
                 .id_salt("sensor-table")
@@ -280,9 +408,6 @@ impl GpuSharkApp {
         if detail_open {
             self.detail_panel(ui, &sensors);
         }
-        ui.add_space(6.0);
-        ui.separator();
-        self.sensors_bottom_bar(ui, &info);
     }
 
     fn sensor_table(&mut self, ui: &mut egui::Ui, sensors: &[SensorReading]) {
@@ -486,21 +611,25 @@ impl GpuSharkApp {
         let language = self.language();
         ui.horizontal(|ui| {
             let name = info.gpu_name.as_deref().unwrap_or("Unknown GPU");
-            let response = ui.label(RichText::new(name).size(12.5).color(
-                if info.gpu_name.is_none() {
-                    p.warning
-                } else {
-                    p.text
-                },
-            ));
+            let reset_width = 78.0;
+            let name_width = (ui.available_width() - reset_width).max(120.0);
+            let response = ui
+                .allocate_ui(Vec2::new(name_width, 22.0), |ui| {
+                    ui.add(
+                        egui::Label::new(RichText::new(name).size(12.5).color(
+                            if info.gpu_name.is_none() {
+                                p.warning
+                            } else {
+                                p.text
+                            },
+                        ))
+                        .truncate(),
+                    )
+                })
+                .inner;
             if info.gpu_name.is_none() {
                 response.on_hover_text(language.text(Key::UnknownGpu));
             }
-            ui.label(
-                RichText::new(language.refresh_hint(self.settings.refresh_interval_ms))
-                    .size(11.0)
-                    .color(p.muted),
-            );
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 if ui.button(language.text(Key::Reset)).clicked() {
                     self.history.reset();
@@ -635,6 +764,13 @@ impl GpuSharkApp {
                     ui.end_row();
                     ui.label(language.text(Key::Autostart));
                     ui.checkbox(&mut self.settings_draft.autostart, "");
+                    ui.end_row();
+                    ui.label(if matches!(language, Language::Russian) {
+                        "Проверять обновления при запуске"
+                    } else {
+                        "Check for updates at startup"
+                    });
+                    ui.checkbox(&mut self.settings_draft.check_updates, "");
                     ui.end_row();
                 });
             ui.add_space(16.0);
@@ -827,7 +963,114 @@ impl GpuSharkApp {
                 .size(10.5)
                 .color(p.muted),
             );
+            ui.add_space(14.0);
+            ui.separator();
+            self.update_section(ui);
         });
+    }
+
+    fn update_section(&mut self, ui: &mut egui::Ui) {
+        let p = self.palette();
+        let language = self.language();
+        let status = update_status_snapshot();
+        let (status_line, status_color) = match &status {
+            crate::updates::UpdateStatus::Idle => {
+                if self.settings.check_updates {
+                    (None, p.muted)
+                } else {
+                    (
+                        Some(language.text(Key::UpdateDisabled).to_owned()),
+                        p.warning,
+                    )
+                }
+            }
+            crate::updates::UpdateStatus::Checking => {
+                (Some(language.text(Key::UpdateChecking).to_owned()), p.muted)
+            }
+            crate::updates::UpdateStatus::UpToDate => {
+                (Some(language.text(Key::UpdateUpToDate).to_owned()), p.text)
+            }
+            crate::updates::UpdateStatus::Available { latest, .. } => (
+                Some(format!("{} {latest}", language.text(Key::UpdateAvailable))),
+                p.text,
+            ),
+            crate::updates::UpdateStatus::Downloading => (
+                Some(language.text(Key::UpdateDownloading).to_owned()),
+                p.muted,
+            ),
+            crate::updates::UpdateStatus::ReadyToInstall { .. } => {
+                (Some(language.text(Key::UpdateReady).to_owned()), p.text)
+            }
+            crate::updates::UpdateStatus::InstallFailed { .. } => (
+                Some(language.text(Key::UpdateInstallFailed).to_owned()),
+                p.danger,
+            ),
+            crate::updates::UpdateStatus::Failed(_) => {
+                (Some(language.text(Key::UpdateFailed).to_owned()), p.danger)
+            }
+        };
+        if let Some(line) = status_line {
+            ui.label(RichText::new(line).size(12.0).color(status_color));
+        }
+        let (action, action_enabled) = match &status {
+            crate::updates::UpdateStatus::Available { .. }
+            | crate::updates::UpdateStatus::InstallFailed { .. } => {
+                (language.text(Key::UpdateInstall), true)
+            }
+            crate::updates::UpdateStatus::ReadyToInstall { .. } => {
+                (language.text(Key::UpdateRestart), true)
+            }
+            crate::updates::UpdateStatus::Checking | crate::updates::UpdateStatus::Downloading => {
+                (language.text(Key::UpdateChecking), false)
+            }
+            _ => (language.text(Key::UpdateCheck), true),
+        };
+        ui.add_space(4.0);
+        if ui
+            .add_enabled(
+                action_enabled,
+                egui::Button::new(RichText::new(action).size(12.5).strong().color(p.graph)),
+            )
+            .clicked()
+        {
+            let ctx = ui.ctx().clone();
+            match &status {
+                crate::updates::UpdateStatus::Available { .. }
+                | crate::updates::UpdateStatus::InstallFailed { .. } => start_update_download(ctx),
+                crate::updates::UpdateStatus::ReadyToInstall { exe_path, .. } => {
+                    start_update_install(ctx, exe_path.clone());
+                }
+                crate::updates::UpdateStatus::Checking
+                | crate::updates::UpdateStatus::Downloading => {}
+                _ => start_update_check(ctx),
+            }
+        }
+        let page_url = match &status {
+            crate::updates::UpdateStatus::Available { url, .. }
+            | crate::updates::UpdateStatus::ReadyToInstall { url, .. }
+            | crate::updates::UpdateStatus::InstallFailed { url, .. } => url.clone(),
+            _ => String::new(),
+        };
+        if !page_url.is_empty() {
+            if ui
+                .link(
+                    RichText::new(language.text(Key::UpdateOpen))
+                        .size(12.0)
+                        .color(p.muted),
+                )
+                .clicked()
+            {
+                open_release_page(&page_url);
+            }
+        }
+        let detail = match &status {
+            crate::updates::UpdateStatus::Failed(detail)
+            | crate::updates::UpdateStatus::InstallFailed { detail, .. } => detail.clone(),
+            _ => String::new(),
+        };
+        if !detail.is_empty() {
+            ui.label(RichText::new(detail).size(10.5).color(p.muted).weak());
+        }
     }
 
     fn start_feedback(&mut self, ctx: &egui::Context) {
@@ -957,6 +1200,25 @@ impl eframe::App for GpuSharkApp {
                     .inner_margin(egui::Margin::symmetric(10, 4)),
             )
             .show(ui, |ui| self.tab_bar(ui));
+        if self.tab == Tab::Sensors {
+            if let Some(Snapshot::Data(info)) = self.snapshot.clone() {
+                if info
+                    .error
+                    .as_deref()
+                    .is_none_or(|error| error.trim().is_empty())
+                {
+                    egui::Panel::bottom("sensors-bar")
+                        .exact_size(34.0)
+                        .show_separator_line(false)
+                        .frame(
+                            egui::Frame::new()
+                                .fill(p.background)
+                                .inner_margin(egui::Margin::symmetric(12, 5)),
+                        )
+                        .show(ui, |ui| self.sensors_bottom_bar(ui, &info));
+                }
+            }
+        }
         egui::CentralPanel::default()
             .frame(
                 egui::Frame::new()
@@ -1018,6 +1280,13 @@ fn spawn_worker(
 
 pub fn ordered_sensors(info: &SysInfo) -> Vec<SensorReading> {
     let mut sensors = info.sensors.clone();
+    if is_geforce_rtx_50_series(info.gpu_name.as_deref()) {
+        for sensor in &mut sensors {
+            if metadata(sensor).kind == SensorKind::HotspotTemperature {
+                sensor.name = format!("{} (BETA)", sensor.name);
+            }
+        }
+    }
     if let Some(reason) = info
         .perfcap_reason
         .as_deref()
@@ -1037,6 +1306,20 @@ pub fn ordered_sensors(info: &SysInfo) -> Vec<SensorReading> {
         (item.group, item.priority, sensor.name.clone())
     });
     sensors
+}
+
+fn is_geforce_rtx_50_series(gpu_name: Option<&str>) -> bool {
+    let Some(name) = gpu_name.map(str::to_ascii_lowercase) else {
+        return false;
+    };
+    let Some(model) = name.split("geforce rtx ").nth(1) else {
+        return false;
+    };
+    let digits = model
+        .chars()
+        .take_while(char::is_ascii_digit)
+        .collect::<String>();
+    digits.len() >= 4 && digits.starts_with("50")
 }
 
 fn configure_style(ctx: &egui::Context, theme: UiTheme, accent: Color32) {
@@ -1339,5 +1622,13 @@ mod tests {
             }),
             "1.050 V"
         );
+    }
+
+    #[test]
+    fn rtx_50_hotspot_is_marked_beta() {
+        let mut snapshot = info(&[("Hot Spot", 68.0, "°C")]);
+        snapshot.gpu_name = Some("NVIDIA GeForce RTX 5070 Ti".into());
+        let rows = ordered_sensors(&snapshot);
+        assert_eq!(rows[0].name, "Hot Spot (BETA)");
     }
 }
