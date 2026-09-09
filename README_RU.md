@@ -49,7 +49,7 @@ GPU Shark — нативное Windows-приложение на Rust и egui б
 ### Интерфейс приложения
 
 <div align="center">
-  <img src="materials/Screenshot1.png" alt="Окно GPU Shark" width="100%" />
+  <img src="materials/Screenshot1.png" alt="Раздел о программе GPU Shark" width="560" />
 </div>
 
 Показания, настройки, сведения о программе и отправка обратной связи с

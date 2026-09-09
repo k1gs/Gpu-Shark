@@ -52,7 +52,7 @@ stay hidden instead of being replaced with guessed values.[^sensor-availability]
 ### Desktop interface
 
 <div align="center">
-  <img src="materials/Screenshot1.png" alt="GPU Shark interface view" width="100%" />
+  <img src="materials/Screenshot1.png" alt="GPU Shark About view" width="560" />
 </div>
 
 The interface keeps live readings, settings, About information and
