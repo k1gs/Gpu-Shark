@@ -11,6 +11,7 @@ mod gui_state;
 mod gui_view;
 mod sensor_model;
 mod settings;
+mod updates;
 
 use gpu_shark::{SysInfo, dll_library_path, fetch_data_from_dll, load_driver_library};
 use std::sync::{
@@ -30,6 +31,7 @@ use windows_sys::Win32::Graphics::Gdi::{
 };
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::UI::HiDpi::GetDpiForSystem;
+use windows_sys::Win32::UI::Shell::ShellExecuteW;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     AdjustWindowRectEx, CS_DBLCLKS, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, CreateWindowExW,
     DefWindowProcW, DestroyWindow, DispatchMessageW, ES_AUTOVSCROLL, ES_MULTILINE, GetClientRect,
@@ -43,6 +45,8 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 
 const WM_APP_SNAPSHOT: u32 = WM_APP + 1;
 const WM_APP_FEEDBACK: u32 = WM_APP + 2;
+const WM_APP_UPDATE: u32 = WM_APP + 3;
+const WM_APP_UPDATE_APPLIED: u32 = WM_APP + 4;
 static SHARED: OnceLock<Arc<Mutex<Option<Snapshot>>>> = OnceLock::new();
 static STOP_TX: OnceLock<mpsc::Sender<()>> = OnceLock::new();
 static SENSOR_HISTORY: OnceLock<Mutex<gui_state::SensorHistory>> = OnceLock::new();
@@ -56,6 +60,8 @@ static HEADER_NAV: OnceLock<Mutex<gui_view::HeaderNavLayout>> = OnceLock::new();
 static FEEDBACK_STATUS: OnceLock<Mutex<FeedbackStatus>> = OnceLock::new();
 static FEEDBACK_CONSENT: AtomicBool = AtomicBool::new(false);
 static FEEDBACK_SENDING: AtomicBool = AtomicBool::new(false);
+static UPDATE_STATUS: OnceLock<Mutex<updates::UpdateStatus>> = OnceLock::new();
+static UPDATE_CHECK_RUNNING: AtomicBool = AtomicBool::new(false);
 
 #[derive(Clone)]
 enum Snapshot {
@@ -94,7 +100,7 @@ impl FeedbackStatus {
     }
 }
 
-fn wstr(text: &str) -> Vec<u16> {
+pub(crate) fn wstr(text: &str) -> Vec<u16> {
     text.encode_utf16().chain(Some(0)).collect()
 }
 
@@ -184,6 +190,135 @@ unsafe fn show_about(hwnd: HWND) {
         ABOUT_VISIBLE.store(true, Ordering::Release);
         hide_feedback_controls();
         InvalidateRect(hwnd, std::ptr::null(), 0);
+    }
+}
+
+fn update_status_snapshot() -> updates::UpdateStatus {
+    UPDATE_STATUS
+        .get()
+        .and_then(|slot| slot.lock().ok())
+        .map(|value| value.clone())
+        .unwrap_or(updates::UpdateStatus::Idle)
+}
+
+fn start_update_check(hwnd: HWND) {
+    if UPDATE_CHECK_RUNNING.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    if let Some(slot) = UPDATE_STATUS.get() {
+        if let Ok(mut value) = slot.lock() {
+            *value = updates::UpdateStatus::Checking;
+        }
+    }
+    unsafe {
+        InvalidateRect(hwnd, std::ptr::null(), 0);
+    }
+    thread::spawn(move || {
+        let status = match updates::fetch_latest() {
+            Ok(release) => {
+                if updates::is_newer(&release.tag_name, updates::current_version()) {
+                    updates::UpdateStatus::Available {
+                        latest: release.tag_name,
+                        url: release.html_url,
+                    }
+                } else {
+                    updates::UpdateStatus::UpToDate
+                }
+            }
+            Err(error) => updates::UpdateStatus::Failed(error),
+        };
+        if let Some(slot) = UPDATE_STATUS.get() {
+            if let Ok(mut value) = slot.lock() {
+                *value = status;
+            }
+        }
+        UPDATE_CHECK_RUNNING.store(false, Ordering::Release);
+        unsafe {
+            PostMessageW(hwnd, WM_APP_UPDATE, 0, 0);
+        }
+    });
+}
+
+fn start_update_download(hwnd: HWND) {
+    if UPDATE_CHECK_RUNNING.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    if let Some(slot) = UPDATE_STATUS.get() {
+        if let Ok(mut value) = slot.lock() {
+            *value = updates::UpdateStatus::Downloading;
+        }
+    }
+    unsafe {
+        InvalidateRect(hwnd, std::ptr::null(), 0);
+    }
+    thread::spawn(move || {
+        let root = updates::update_root().unwrap_or_else(|_| std::env::temp_dir());
+        let status = match updates::prepare_install(&root) {
+            Ok(prepared) => updates::UpdateStatus::ReadyToInstall {
+                exe_path: prepared.exe_path.display().to_string(),
+                url: prepared.page_url,
+            },
+            Err(detail) => updates::UpdateStatus::InstallFailed {
+                detail,
+                url: String::new(),
+            },
+        };
+        if let Some(slot) = UPDATE_STATUS.get() {
+            if let Ok(mut value) = slot.lock() {
+                *value = status;
+            }
+        }
+        UPDATE_CHECK_RUNNING.store(false, Ordering::Release);
+        unsafe {
+            PostMessageW(hwnd, WM_APP_UPDATE, 0, 0);
+        }
+    });
+}
+
+fn start_update_install(hwnd: HWND, new_exe: &str) {
+    if UPDATE_CHECK_RUNNING.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    let new_exe = new_exe.to_owned();
+    thread::spawn(move || {
+        let result = updates::apply_prepared(std::path::Path::new(&new_exe));
+        let success = result.is_ok();
+        if let Err(detail) = result {
+            if let Some(slot) = UPDATE_STATUS.get() {
+                if let Ok(mut value) = slot.lock() {
+                    *value = updates::UpdateStatus::InstallFailed {
+                        detail,
+                        url: String::new(),
+                    };
+                }
+            }
+        }
+        UPDATE_CHECK_RUNNING.store(false, Ordering::Release);
+        unsafe {
+            PostMessageW(hwnd, WM_APP_UPDATE_APPLIED, usize::from(success), 0);
+        }
+    });
+}
+
+fn launch_updated_app() {
+    let Ok(current) = std::env::current_exe() else {
+        return;
+    };
+    let _ = std::process::Command::new(&current).spawn();
+}
+
+fn open_release_page(url: &str) {
+    let verb = wstr("open");
+    let file = wstr(url);
+    unsafe {
+        ShellExecuteW(
+            0,
+            verb.as_ptr(),
+            file.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            SW_SHOW,
+        );
     }
 }
 
@@ -469,6 +604,8 @@ unsafe fn paint(hwnd: HWND) {
                 icon,
                 language,
                 concat!("v", env!("CARGO_PKG_VERSION")),
+                &update_status_snapshot(),
+                gui_settings::current().check_updates,
             );
         } else {
             match &snapshot {
@@ -533,6 +670,19 @@ unsafe extern "system" fn wnd_proc(
                 InvalidateRect(hwnd, std::ptr::null(), 0);
                 0
             }
+            WM_APP_UPDATE => {
+                InvalidateRect(hwnd, std::ptr::null(), 0);
+                0
+            }
+            WM_APP_UPDATE_APPLIED => {
+                if _wparam == 1 {
+                    launch_updated_app();
+                    PostMessageW(hwnd, WM_CLOSE, 0, 0);
+                } else {
+                    InvalidateRect(hwnd, std::ptr::null(), 0);
+                }
+                0
+            }
             WM_PAINT => {
                 paint(hwnd);
                 0
@@ -571,6 +721,29 @@ unsafe extern "system" fn wnd_proc(
                 if ABOUT_VISIBLE.load(Ordering::Acquire) {
                     if x >= 850 && y <= 170 {
                         ABOUT_VISIBLE.store(false, Ordering::Release);
+                    } else if gui_view::point_in_rect(&gui_view::UPDATE_ACTION_HIT, x, y) {
+                        match update_status_snapshot() {
+                            updates::UpdateStatus::Available { .. }
+                            | updates::UpdateStatus::InstallFailed { .. } => {
+                                start_update_download(hwnd);
+                            }
+                            updates::UpdateStatus::ReadyToInstall { exe_path, .. } => {
+                                start_update_install(hwnd, &exe_path);
+                            }
+                            updates::UpdateStatus::Checking
+                            | updates::UpdateStatus::Downloading => {}
+                            _ => start_update_check(hwnd),
+                        }
+                    } else if gui_view::point_in_rect(&gui_view::UPDATE_PAGE_HIT, x, y) {
+                        if let updates::UpdateStatus::Available { url, .. }
+                        | updates::UpdateStatus::ReadyToInstall { url, .. }
+                        | updates::UpdateStatus::InstallFailed { url, .. } =
+                            update_status_snapshot()
+                        {
+                            if !url.is_empty() {
+                                open_release_page(&url);
+                            }
+                        }
                     }
                     InvalidateRect(hwnd, std::ptr::null(), 0);
                     return 0;
@@ -700,6 +873,7 @@ fn worker_main(hwnd: HWND, shared: Arc<Mutex<Option<Snapshot>>>, stop: mpsc::Rec
 
 fn main() {
     gui_settings::initialize();
+    updates::cleanup_old_install();
     unsafe {
         let instance = GetModuleHandleW(std::ptr::null());
         let class = wstr("GpuSharkMonitorWindow");
@@ -777,8 +951,12 @@ fn main() {
             settings: (0, 0),
             feedback: (0, 0),
         }));
+        let _ = UPDATE_STATUS.set(Mutex::new(updates::UpdateStatus::Idle));
         ShowWindow(hwnd, SW_SHOW);
         UpdateWindow(hwnd);
+        if gui_settings::current().check_updates {
+            start_update_check(hwnd);
+        }
         let worker = thread::Builder::new()
             .name("gpu-shark-telemetry".into())
             .spawn(move || worker_main(hwnd, shared, rx))

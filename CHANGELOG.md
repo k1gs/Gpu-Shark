@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.4-beta.3
+
+- Added automatic update checks: one anonymous HTTPS request to the public
+  GitHub releases API at startup (User-Agent only, no machine data), with a
+  Settings toggle to disable it.
+- Added one-click update install: the release package is downloaded from the
+  GitHub release, verified against SHA256SUMS.txt before unpacking, and
+  applied with an atomic executable replacement that keeps a rollback backup.
+- Nothing is downloaded or installed automatically; both steps require an
+  explicit click in the About view.
+- The public CI build now embeds the v0.2.4-beta.2 runtime by default.
+
 ## 0.2.4-beta.2
 
 - Rejected the LibreHardwareMonitor Hot Spot and Memory Temperature channels
