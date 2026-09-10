@@ -49,12 +49,6 @@ stay hidden instead of being replaced with guessed values.[^sensor-availability]
 - Consent-based feedback form with no automatic submission
 - Optional update checks and explicit SHA-256-verified installation
 
-### Desktop interface
-
-<div align="center">
-  <img src="materials/Screenshot1.png" alt="GPU Shark About view" width="560" />
-</div>
-
 The interface keeps live readings, settings, About information and
 consent-based feedback in one compact resizable desktop application.
 
