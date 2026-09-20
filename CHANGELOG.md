@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0
 
 - Fixed long sensor names and values overlapping session maxima and sparklines;
   truncated text now remains available through tooltips.
