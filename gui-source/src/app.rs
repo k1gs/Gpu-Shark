@@ -21,6 +21,9 @@ use windows_sys::Win32::UI::Shell::ShellExecuteW;
 const ROW_HEIGHT: f32 = 26.0;
 const SPARK_WIDTH: f32 = 64.0;
 const TABLE_MARGIN: f32 = 10.0;
+const BRAND_WIDTH: f32 = 70.0;
+const TAB_WIDTHS: [f32; 4] = [76.0, 96.0, 136.0, 106.0];
+const TAB_GAP: f32 = 4.0;
 
 static UPDATE_STATUS: OnceLock<Mutex<crate::updates::UpdateStatus>> = OnceLock::new();
 static UPDATE_WORK_RUNNING: AtomicBool = AtomicBool::new(false);
@@ -336,34 +339,45 @@ impl GpuSharkApp {
         let p = self.palette();
         ui.set_min_height(34.0);
         ui.horizontal(|ui| {
-            ui.add_space(6.0);
-            ui.label(RichText::new("GPU SHARK").size(12.0).strong().color(p.text));
-            ui.add_space(14.0);
-            for (tab, key) in [
+            ui.spacing_mut().item_spacing.x = TAB_GAP;
+            ui.spacing_mut().button_padding.x = 6.0;
+            ui.add_sized(
+                [BRAND_WIDTH, 26.0],
+                egui::Label::new(RichText::new("GPU SHARK").size(12.0).strong().color(p.text))
+                    .truncate()
+                    .selectable(false),
+            );
+            for ((tab, key), width) in [
                 (Tab::Sensors, Key::Sensors),
                 (Tab::Settings, Key::Settings),
                 (Tab::Feedback, Key::Feedback),
                 (Tab::About, Key::About),
-            ] {
+            ]
+            .into_iter()
+            .zip(TAB_WIDTHS)
+            {
                 let active = self.tab == tab;
                 let text = RichText::new(self.language().text(key))
                     .size(12.5)
                     .strong()
                     .color(if active { p.text } else { p.muted });
                 let button = egui::Button::new(text)
-                    .min_size(Vec2::new(0.0, 26.0))
                     .fill(if active {
                         p.background
                     } else {
                         Color32::TRANSPARENT
                     })
-                    .stroke(if active {
-                        Stroke::new(1.0, p.divider)
-                    } else {
-                        Stroke::NONE
-                    })
-                    .corner_radius(0.0);
-                if ui.add(button).clicked() {
+                    .stroke(Stroke::new(
+                        1.0,
+                        if active {
+                            p.divider
+                        } else {
+                            Color32::TRANSPARENT
+                        },
+                    ))
+                    .corner_radius(0.0)
+                    .truncate();
+                if ui.add_sized([width, 26.0], button).clicked() {
                     self.tab = tab;
                 }
             }
@@ -434,35 +448,58 @@ impl GpuSharkApp {
                 [rect.left_bottom(), rect.right_bottom()],
                 Stroke::new(1.0, p.divider.gamma_multiply(0.7)),
             );
-            painter.text(
-                egui::pos2(rect.left() + TABLE_MARGIN, rect.center().y),
-                Align2::LEFT_CENTER,
-                &sensor.name,
-                font.clone(),
-                p.text,
-            );
-            let value_x = rect.left() + ((width - 200.0).max(240.0) * 0.55) + TABLE_MARGIN;
-            painter.text(
-                egui::pos2(value_x, rect.center().y),
-                Align2::LEFT_CENTER,
-                sensor_value(sensor),
-                font,
-                sensor_color(sensor, p),
-            );
             let spark = Rect::from_min_size(
                 egui::pos2(rect.right() - SPARK_WIDTH - 8.0, rect.center().y - 9.0),
                 Vec2::new(SPARK_WIDTH, 18.0),
+            );
+            let content_left = rect.left() + TABLE_MARGIN;
+            let max_right = (spark.left() - 14.0).max(content_left);
+            let max_left = (max_right - 56.0).max(content_left);
+            let value_right = (max_left - 8.0).max(content_left);
+            let requested_value_left =
+                rect.left() + ((width - 200.0).max(240.0) * 0.55) + TABLE_MARGIN;
+            let value_left = requested_value_left.clamp(content_left, value_right);
+            let name_right = (value_left - 8.0).max(content_left);
+            let name_rect = Rect::from_min_max(
+                egui::pos2(content_left, rect.top()),
+                egui::pos2(name_right, rect.bottom()),
+            );
+            let value_rect = Rect::from_min_max(
+                egui::pos2(value_left, rect.top()),
+                egui::pos2(value_right, rect.bottom()),
+            );
+            let max_rect = Rect::from_min_max(
+                egui::pos2(max_left, rect.top()),
+                egui::pos2(max_right, rect.bottom()),
+            );
+            let name_elided = paint_elided(
+                painter,
+                name_rect,
+                &sensor.name,
+                font.clone(),
+                p.text,
+                Align::Min,
+            );
+            let value = sensor_value(sensor);
+            let value_elided = paint_elided(
+                painter,
+                value_rect,
+                &value,
+                font,
+                sensor_color(sensor, p),
+                Align::Min,
             );
             let samples = self.history.row_samples(&id);
             let unit = sensor.unit.trim();
             if tracked {
                 if let Some(stats) = self.history.row_stats(&id) {
-                    painter.text(
-                        egui::pos2(spark.left() - 14.0, rect.center().y),
-                        Align2::RIGHT_CENTER,
-                        format!("{:.1}", stats.max),
+                    paint_elided(
+                        painter,
+                        max_rect,
+                        &format!("{:.1}", stats.max),
                         FontId::monospace(11.0),
                         p.graph,
+                        Align::Max,
                     );
                 }
             }
@@ -479,6 +516,12 @@ impl GpuSharkApp {
                 }
             }
             let mut tooltip = String::from(sensor_tooltip(item.kind, self.language()));
+            if value_elided {
+                tooltip = format!("{value}\n{tooltip}");
+            }
+            if name_elided {
+                tooltip = format!("{}\n{tooltip}", sensor.name);
+            }
             if let Some(stats) = self.history.row_stats(&id) {
                 let language = self.language();
                 tooltip.push_str(&format!(
@@ -524,40 +567,56 @@ impl GpuSharkApp {
         };
         ui.add_space(8.0);
         let tracked = self.history.is_tracked(&selected_id);
-        ui.horizontal(|ui| {
-            ui.vertical(|ui| {
-                ui.label(
-                    RichText::new(&sensor.name)
-                        .size(15.0)
-                        .strong()
-                        .color(p.text),
-                );
-                let shown = if tracked {
-                    self.history
-                        .row_stats(&selected_id)
-                        .map(|stats| stats.max)
-                        .unwrap_or(sensor.value)
-                } else {
-                    sensor.value
-                };
-                ui.label(
-                    RichText::new(format!("{:.1} {}", shown, sensor.unit.trim()))
-                        .size(22.0)
-                        .strong()
-                        .color(sensor_color(sensor, p)),
-                );
-            });
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if tracked {
-                    ui.label(
-                        RichText::new(language.text(Key::ShowingMaximum))
-                            .size(10.5)
-                            .strong()
-                            .color(p.graph),
-                    );
-                }
-            });
-        });
+        let shown = if tracked {
+            self.history
+                .row_stats(&selected_id)
+                .map(|stats| stats.max)
+                .unwrap_or(sensor.value)
+        } else {
+            sensor.value
+        };
+        egui::Sides::new()
+            .height(52.0)
+            .spacing(12.0)
+            .shrink_left()
+            .truncate()
+            .show(
+                ui,
+                |ui| {
+                    ui.vertical(|ui| {
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(&sensor.name)
+                                    .size(15.0)
+                                    .strong()
+                                    .color(p.text),
+                            )
+                            .truncate()
+                            .selectable(false),
+                        );
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(format!("{:.1} {}", shown, sensor.unit.trim()))
+                                    .size(22.0)
+                                    .strong()
+                                    .color(sensor_color(sensor, p)),
+                            )
+                            .truncate()
+                            .selectable(false),
+                        );
+                    });
+                },
+                |ui| {
+                    if tracked {
+                        ui.label(
+                            RichText::new(language.text(Key::ShowingMaximum))
+                                .size(10.5)
+                                .strong()
+                                .color(p.graph),
+                        );
+                    }
+                },
+            );
         if metadata(sensor).kind == SensorKind::PerfCap {
             ui.label(RichText::new(language.text(Key::PerfCapDetail)).color(p.text));
             ui.label(RichText::new(language.text(Key::PerfCapNoGraph)).color(p.muted));
@@ -840,62 +899,66 @@ impl GpuSharkApp {
         let language = self.language();
         let p = self.palette();
         let mut submit = false;
-        ui.add_space(14.0);
-        ui.allocate_ui(Vec2::new(660.0, ui.available_height()), |ui| {
-            ui.label(RichText::new(language.text(Key::FeedbackPrivacy)).color(p.text));
-            ui.add_space(10.0);
-            ui.label(language.text(Key::FeedbackContact));
-            ui.add(
-                egui::TextEdit::singleline(&mut self.feedback_contact)
-                    .hint_text(if matches!(language, Language::Russian) {
-                        "Email или другой контакт"
+        egui::ScrollArea::vertical()
+            .id_salt("feedback-scroll")
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width().min(660.0));
+                ui.add_space(14.0);
+                ui.label(RichText::new(language.text(Key::FeedbackPrivacy)).color(p.text));
+                ui.add_space(10.0);
+                ui.label(language.text(Key::FeedbackContact));
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.feedback_contact)
+                        .hint_text(if matches!(language, Language::Russian) {
+                            "Email или другой контакт"
+                        } else {
+                            "Email or another contact"
+                        })
+                        .char_limit(500),
+                );
+                ui.label(language.text(Key::FeedbackDescription));
+                ui.add(
+                    egui::TextEdit::multiline(&mut self.feedback_note)
+                        .desired_rows(7)
+                        .lock_focus(true)
+                        .char_limit(8_000),
+                );
+                ui.checkbox(
+                    &mut self.feedback_consent,
+                    language.text(Key::FeedbackConsent),
+                );
+                ui.add_space(8.0);
+                ui.horizontal_wrapped(|ui| {
+                    let caption = if self.feedback_sending {
+                        language.text(Key::FeedbackSending)
                     } else {
-                        "Email or another contact"
-                    })
-                    .char_limit(500),
-            );
-            ui.label(language.text(Key::FeedbackDescription));
-            ui.add(
-                egui::TextEdit::multiline(&mut self.feedback_note)
-                    .desired_rows(7)
-                    .lock_focus(true)
-                    .char_limit(8_000),
-            );
-            ui.checkbox(
-                &mut self.feedback_consent,
-                language.text(Key::FeedbackConsent),
-            );
-            ui.add_space(8.0);
-            ui.horizontal(|ui| {
-                let caption = if self.feedback_sending {
-                    language.text(Key::FeedbackSending)
-                } else {
-                    language.text(Key::FeedbackSubmit)
-                };
-                if ui
-                    .add_enabled(
-                        !self.feedback_sending,
-                        egui::Button::new(caption).fill(if self.feedback_consent {
+                        language.text(Key::FeedbackSubmit)
+                    };
+                    if ui
+                        .add_enabled(
+                            !self.feedback_sending,
+                            egui::Button::new(caption).fill(if self.feedback_consent {
+                                self.accent()
+                            } else {
+                                p.hover
+                            }),
+                        )
+                        .clicked()
+                    {
+                        submit = true;
+                    }
+                    let status = self.feedback_status.localized(language);
+                    if !status.is_empty() {
+                        let color = if matches!(self.feedback_status, FeedbackStatus::Accepted(_)) {
                             self.accent()
                         } else {
-                            p.hover
-                        }),
-                    )
-                    .clicked()
-                {
-                    submit = true;
-                }
-                let status = self.feedback_status.localized(language);
-                if !status.is_empty() {
-                    let color = if matches!(self.feedback_status, FeedbackStatus::Accepted(_)) {
-                        self.accent()
-                    } else {
-                        p.text
-                    };
-                    ui.label(RichText::new(status).color(color));
-                }
+                            p.text
+                        };
+                        ui.label(RichText::new(status).color(color));
+                    }
+                });
             });
-        });
         if submit {
             let ctx = ui.ctx().clone();
             self.start_feedback(&ctx);
@@ -926,47 +989,51 @@ impl GpuSharkApp {
         if self.about_icon.is_none() {
             self.about_icon = load_icon_texture(ui.ctx());
         }
-        ui.add_space(28.0);
-        ui.allocate_ui(Vec2::new(480.0, ui.available_height()), |ui| {
-            ui.horizontal(|ui| {
-                if let Some(icon) = &self.about_icon {
-                    ui.add(egui::Image::new((icon.id(), Vec2::splat(72.0))));
-                    ui.add_space(12.0);
-                }
-                ui.vertical(|ui| {
-                    ui.label(
-                        RichText::new("GPU SHARK")
-                            .size(24.0)
-                            .strong()
-                            .color(p.graph),
-                    );
-                    ui.label(
-                        RichText::new(format!("Version {}", env!("CARGO_PKG_VERSION")))
-                            .size(12.0)
-                            .color(p.muted),
-                    );
+        egui::ScrollArea::vertical()
+            .id_salt("about-scroll")
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width().min(480.0));
+                ui.add_space(28.0);
+                ui.horizontal(|ui| {
+                    if let Some(icon) = &self.about_icon {
+                        ui.add(egui::Image::new((icon.id(), Vec2::splat(72.0))));
+                        ui.add_space(12.0);
+                    }
+                    ui.vertical(|ui| {
+                        ui.label(
+                            RichText::new("GPU SHARK")
+                                .size(24.0)
+                                .strong()
+                                .color(p.graph),
+                        );
+                        ui.label(
+                            RichText::new(format!("Version {}", env!("CARGO_PKG_VERSION")))
+                                .size(12.0)
+                                .color(p.muted),
+                        );
+                    });
                 });
+                ui.add_space(14.0);
+                ui.label(RichText::new(language.text(Key::AboutTagline)).color(p.text));
+                ui.add_space(8.0);
+                ui.label(RichText::new(language.text(Key::AboutReadOnly)).color(p.text));
+                ui.label(RichText::new(language.text(Key::AboutLicense)).color(p.text));
+                ui.add_space(14.0);
+                ui.separator();
+                ui.label(
+                    RichText::new(if matches!(language, Language::Russian) {
+                        "Шрифт: Ubuntu — лицензия Ubuntu Font License (см. assets/fonts)."
+                    } else {
+                        "Font: Ubuntu — Ubuntu Font License (see assets/fonts)."
+                    })
+                    .size(10.5)
+                    .color(p.muted),
+                );
+                ui.add_space(14.0);
+                ui.separator();
+                self.update_section(ui);
             });
-            ui.add_space(14.0);
-            ui.label(RichText::new(language.text(Key::AboutTagline)).color(p.text));
-            ui.add_space(8.0);
-            ui.label(RichText::new(language.text(Key::AboutReadOnly)).color(p.text));
-            ui.label(RichText::new(language.text(Key::AboutLicense)).color(p.text));
-            ui.add_space(14.0);
-            ui.separator();
-            ui.label(
-                RichText::new(if matches!(language, Language::Russian) {
-                    "Шрифт: Ubuntu — лицензия Ubuntu Font License (см. assets/fonts)."
-                } else {
-                    "Font: Ubuntu — Ubuntu Font License (see assets/fonts)."
-                })
-                .size(10.5)
-                .color(p.muted),
-            );
-            ui.add_space(14.0);
-            ui.separator();
-            self.update_section(ui);
-        });
     }
 
     fn update_section(&mut self, ui: &mut egui::Ui) {
@@ -1347,6 +1414,31 @@ fn configure_style(ctx: &egui::Context, theme: UiTheme, accent: Color32) {
     style.visuals.widgets.hovered.bg_fill = p.hover;
     style.visuals.widgets.active.bg_fill = p.selection;
     ctx.set_style_of(egui_theme, style);
+}
+
+fn paint_elided(
+    painter: &egui::Painter,
+    rect: Rect,
+    text: &str,
+    font: FontId,
+    color: Color32,
+    align: Align,
+) -> bool {
+    if rect.width() <= 0.0 {
+        return !text.is_empty();
+    }
+    let mut job = egui::text::LayoutJob::simple_singleline(text.to_owned(), font, color);
+    job.wrap = egui::text::TextWrapping::truncate_at_width(rect.width());
+    let galley = painter.layout_job(job);
+    let elided = galley.elided;
+    let x = match align {
+        Align::Min => rect.left(),
+        Align::Center => rect.center().x - galley.size().x * 0.5,
+        Align::Max => rect.right() - galley.size().x,
+    };
+    let position = egui::pos2(x, rect.center().y - galley.size().y * 0.5);
+    painter.with_clip_rect(rect).galley(position, galley, color);
+    elided
 }
 
 fn sparkline(painter: &egui::Painter, rect: Rect, samples: &[f32], color: Color32) {

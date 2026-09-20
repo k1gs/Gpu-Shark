@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Fixed long sensor names and values overlapping session maxima and sparklines;
+  truncated text now remains available through tooltips.
+- Stabilized the top navigation so tabs no longer shift when the active page
+  changes, including at the minimum window width in English and Russian.
+- Made the Feedback and About pages adapt to narrow windows and scroll
+  vertically when their content exceeds the available height.
+
 ## 0.2.5
 
 - Replaced the previous Win32/GDI dashboard with a modern resizable egui
