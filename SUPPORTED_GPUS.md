@@ -17,7 +17,13 @@ imply that every board variant exposes the same sensors.
 | GeForce RTX 5060 Ti | Yes | Beta | Beta | GPC register HotSpot profile |
 | GeForce RTX 5070 | Yes | Beta | Beta | GPC register HotSpot profile |
 | GeForce RTX 5070 Ti | Yes | Beta | Beta | GPC register HotSpot profile |
+| GeForce RTX 5090 | Yes | Validated | Validated | Fully validated on tested hardware |
+| RTX PRO 6000 Blackwell | Yes | Validated | Validated | Fully validated on tested hardware |
 | Other NVIDIA GPUs | Usually | Driver-dependent | Driver/board-dependent | Conservative fallback |
+
+The RTX 5090 and RTX PRO 6000 Blackwell entries reflect maintainer-confirmed
+full application validation on the tested hardware; they do not extend sensor
+mappings to other board variants.
 
 When a value cannot be validated, GPU Shark leaves it unavailable. This is intentional.
 Open an issue with the exact GPU model, board vendor, driver version and VBIOS

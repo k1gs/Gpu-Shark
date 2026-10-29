@@ -76,7 +76,8 @@ Enhanced temperature support is deliberately tracked per validated device
 profile.[^sensor-availability]
 
 > [!WARNING]
-> GeForce RTX 50-series enhanced temperatures are **beta**. GPU Shark rejects
+> GeForce RTX 50-series enhanced temperatures remain **beta** on models not
+> explicitly marked as validated below. GPU Shark rejects
 > the LibreHardwareMonitor Hot Spot and Memory Temperature channels on every
 > GeForce RTX 50 card because they were confirmed to publish Core-like,
 > unrelated or missing values. HotSpot comes only from the read-only native
@@ -98,6 +99,8 @@ profile.[^sensor-availability]
 | GeForce RTX 5060 Ti | Yes | Beta[^rtx50] | Beta | GPC register HotSpot profile |
 | GeForce RTX 5070 | Yes | Beta[^rtx50] | Beta | GPC register HotSpot profile |
 | GeForce RTX 5070 Ti | Yes | Beta[^rtx50] | Beta | GPC register HotSpot profile |
+| GeForce RTX 5090 | Yes | Validated | Validated | Fully validated on tested hardware |
+| RTX PRO 6000 Blackwell | Yes | Validated | Validated | Fully validated on tested hardware |
 | Other NVIDIA GPUs | Usually | Driver/board-dependent | Driver/board-dependent | Conservative fallback |
 
 See [SUPPORTED_GPUS.md](SUPPORTED_GPUS.md) for the user-facing support matrix.
