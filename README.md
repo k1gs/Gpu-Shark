@@ -36,6 +36,10 @@ stay hidden instead of being replaced with guessed values.[^sensor-availability]
 ### Highlights
 
 - GPU Core, HotSpot and VRAM temperatures when the hardware exposes them
+- Selectable, persisted Celsius/Fahrenheit display for temperature readings,
+  session maxima, current/minimum/average/maximum details, graph axes and
+  hover tooltips; history and safety thresholds remain canonical Celsius
+  (non-temperature and unavailable values are unchanged)
 - Decoded NVIDIA PerfCap reasons compatible with GPU-Z: <code>Pwr</code>,
   <code>Thrm</code>, <code>VRel</code>, <code>VOp</code>, <code>Idle</code>
   and <code>SLI</code>
@@ -48,6 +52,13 @@ stay hidden instead of being replaced with guessed values.[^sensor-availability]
 - Localized About view with the project logo and application version
 - Consent-based feedback form with no automatic submission
 - Optional update checks and explicit SHA-256-verified installation
+
+### Temperature units
+
+To persist the display unit, open **Settings**, choose **Temperature**,
+select **°F**, and click **Apply**. Celsius is the default; the conversion
+affects displayed temperature values, while history and safety thresholds
+continue to use canonical Celsius.
 
 The interface keeps live readings, settings, About information and
 consent-based feedback in one compact resizable desktop application.

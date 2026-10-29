@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.0
+
+- Added selectable, persisted Celsius/Fahrenheit display for temperature
+  readings, session maxima, current/minimum/average/maximum details, graph
+  axes and hover tooltips. The default remains Celsius; history and safety
+  thresholds remain canonical Celsius, while non-temperature and unavailable
+  values are unchanged.
+- Kept the telemetry providers and runtime contract unchanged.
+
 ## 0.3.0
 
 - Fixed long sensor names and values overlapping session maxima and sparklines;
