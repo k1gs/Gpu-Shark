@@ -10,6 +10,20 @@ DLLs from the matching `GPU-Shark-gui-runtime-win-x64.zip` release asset. They
 may stay beside a development build or be embedded into a standalone EXE.
 Mixing incompatible GUI and runtime versions is unsupported.
 
+## Temperature units
+
+Open **Settings**, choose **°C** or **°F** under **Temperature**, and click
+**Apply**. The choice is saved in `%LOCALAPPDATA%\GPU Shark\settings.json`.
+Existing settings and **Restore defaults** use Celsius; **Cancel** discards
+unapplied changes.
+
+The selected unit applies to current readings, session maximums, detail
+statistics, graph labels and hover tooltips. Switching units preserves history.
+Telemetry, sensor identities and warning thresholds remain in Celsius.
+Fahrenheit temperatures use `°C × 1.8 + 32`; temperature differences use
+`Δ°C × 1.8` without the offset. Non-temperature readings and unavailable sensors
+are unchanged.
+
 ## Build
 
 Install the stable Rust toolchain and Visual Studio C++ build tools, then run

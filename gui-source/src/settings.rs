@@ -29,6 +29,30 @@ pub enum AccentTheme {
 pub enum TemperatureUnit {
     #[default]
     Celsius,
+    Fahrenheit,
+}
+
+impl TemperatureUnit {
+    pub fn temperature(self, celsius: f32) -> f32 {
+        match self {
+            Self::Celsius => celsius,
+            Self::Fahrenheit => celsius * 1.8 + 32.0,
+        }
+    }
+
+    pub fn delta(self, celsius: f32) -> f32 {
+        match self {
+            Self::Celsius => celsius,
+            Self::Fahrenheit => celsius * 1.8,
+        }
+    }
+
+    pub fn symbol(self) -> &'static str {
+        match self {
+            Self::Celsius => "°C",
+            Self::Fahrenheit => "°F",
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
@@ -230,9 +254,14 @@ mod tests {
         let _ = fs::remove_dir_all(&directory);
         let path = directory.join("settings.json");
         let settings = AppSettings {
-            language: UiLanguage::English,
+            language: UiLanguage::Russian,
+            theme: UiTheme::Dark,
             refresh_interval_ms: 500,
             accent: AccentTheme::Purple,
+            temperature_unit: TemperatureUnit::Fahrenheit,
+            track_all_maxima: false,
+            autostart: true,
+            check_updates: false,
             ..AppSettings::default()
         };
         save_to(&path, &AppSettings::default()).expect("initial settings");
@@ -273,6 +302,37 @@ mod tests {
         fs::write(&path, br#"{"schema_version":1,"future_option":true}"#).expect("future fixture");
         let outcome = load_from(&path);
         assert_eq!(outcome.settings, AppSettings::default());
+        assert!(outcome.warning.is_none());
+        let _ = fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn temperature_conversions_cover_reference_points_and_differences() {
+        let fahrenheit = TemperatureUnit::Fahrenheit;
+        assert_eq!(fahrenheit.temperature(-40.0), -40.0);
+        assert_eq!(fahrenheit.temperature(0.0), 32.0);
+        assert_eq!(fahrenheit.temperature(100.0), 212.0);
+        assert_eq!(fahrenheit.delta(100.0), 180.0);
+        assert_eq!(TemperatureUnit::Celsius.delta(100.0), 100.0);
+        assert_eq!(TemperatureUnit::Celsius.symbol(), "°C");
+        assert_eq!(fahrenheit.symbol(), "°F");
+    }
+
+    #[test]
+    fn old_settings_without_temperature_unit_load_as_celsius() {
+        let directory = directory("old-settings");
+        let _ = fs::remove_dir_all(&directory);
+        fs::create_dir_all(&directory).expect("test settings directory");
+        let path = directory.join("settings.json");
+        fs::write(
+            &path,
+            br#"{"schema_version":1,"theme":"dark","language":"russian"}"#,
+        )
+        .expect("old settings fixture");
+        let outcome = load_from(&path);
+        assert_eq!(outcome.settings.temperature_unit, TemperatureUnit::Celsius);
+        assert_eq!(outcome.settings.theme, UiTheme::Dark);
+        assert_eq!(outcome.settings.language, UiLanguage::Russian);
         assert!(outcome.warning.is_none());
         let _ = fs::remove_dir_all(directory);
     }

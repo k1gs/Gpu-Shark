@@ -2,7 +2,7 @@ use crate::feedback;
 use crate::gui_i18n::{Key, Language};
 use crate::gui_state::{SensorHistory, SensorStats};
 use crate::sensor_model::{SensorKind, metadata, sensor_id};
-use crate::settings::{self, AccentTheme, AppSettings, UiLanguage, UiTheme};
+use crate::settings::{self, AccentTheme, AppSettings, TemperatureUnit, UiLanguage, UiTheme};
 use eframe::egui::{
     self, Align, Align2, Color32, FontId, Layout, Rect, RichText, Sense, Stroke, TextStyle, Vec2,
 };
@@ -480,7 +480,7 @@ impl GpuSharkApp {
                 p.text,
                 Align::Min,
             );
-            let value = sensor_value(sensor);
+            let value = sensor_value(sensor, self.settings.temperature_unit);
             let value_elided = paint_elided(
                 painter,
                 value_rect,
@@ -491,12 +491,21 @@ impl GpuSharkApp {
             );
             let samples = self.history.row_samples(&id);
             let unit = sensor.unit.trim();
+            let display_unit = display_unit(unit, self.settings.temperature_unit);
             if tracked {
                 if let Some(stats) = self.history.row_stats(&id) {
                     paint_elided(
                         painter,
                         max_rect,
-                        &format!("{:.1}", stats.max),
+                        &format!(
+                            "{:.1}",
+                            display_temperature(
+                                stats.max,
+                                unit,
+                                Some(&sensor.name),
+                                self.settings.temperature_unit
+                            )
+                        ),
                         FontId::monospace(11.0),
                         p.graph,
                         Align::Max,
@@ -525,14 +534,34 @@ impl GpuSharkApp {
             if let Some(stats) = self.history.row_stats(&id) {
                 let language = self.language();
                 tooltip.push_str(&format!(
-                    "\n{:.1} {unit} · {} {:.1} · {} {:.1} · {} {:.1}",
-                    stats.current,
+                    "\n{:.1} {display_unit} · {} {:.1} · {} {:.1} · {} {:.1}",
+                    display_temperature(
+                        stats.current,
+                        unit,
+                        Some(&sensor.name),
+                        self.settings.temperature_unit
+                    ),
                     language.text(Key::Min),
-                    stats.min,
+                    display_temperature(
+                        stats.min,
+                        unit,
+                        Some(&sensor.name),
+                        self.settings.temperature_unit
+                    ),
                     language.text(Key::Avg),
-                    stats.avg,
+                    display_temperature(
+                        stats.avg,
+                        unit,
+                        Some(&sensor.name),
+                        self.settings.temperature_unit
+                    ),
                     language.text(Key::Max),
-                    stats.max,
+                    display_temperature(
+                        stats.max,
+                        unit,
+                        Some(&sensor.name),
+                        self.settings.temperature_unit
+                    ),
                 ));
             }
             if let Some(pointer) = response.hover_pos() {
@@ -540,7 +569,15 @@ impl GpuSharkApp {
                     let fraction = ((pointer.x - spark.left()) / spark.width()).clamp(0.0, 1.0);
                     let index = (fraction * (samples.len() - 1) as f32).round() as usize;
                     if let Some(value) = samples.get(index) {
-                        tooltip = format!("{:.1} {unit}\n{tooltip}", value);
+                        tooltip = format!(
+                            "{:.1} {display_unit}\n{tooltip}",
+                            display_temperature(
+                                *value,
+                                unit,
+                                Some(&sensor.name),
+                                self.settings.temperature_unit
+                            )
+                        );
                     }
                 }
             }
@@ -575,6 +612,7 @@ impl GpuSharkApp {
         } else {
             sensor.value
         };
+        let display_unit = display_unit(&sensor.unit, self.settings.temperature_unit);
         egui::Sides::new()
             .height(52.0)
             .spacing(12.0)
@@ -596,10 +634,19 @@ impl GpuSharkApp {
                         );
                         ui.add(
                             egui::Label::new(
-                                RichText::new(format!("{:.1} {}", shown, sensor.unit.trim()))
-                                    .size(22.0)
-                                    .strong()
-                                    .color(sensor_color(sensor, p)),
+                                RichText::new(format!(
+                                    "{:.1} {}",
+                                    display_temperature(
+                                        shown,
+                                        &sensor.unit,
+                                        Some(&sensor.name),
+                                        self.settings.temperature_unit
+                                    ),
+                                    display_unit
+                                ))
+                                .size(22.0)
+                                .strong()
+                                .color(sensor_color(sensor, p)),
                             )
                             .truncate()
                             .selectable(false),
@@ -632,6 +679,8 @@ impl GpuSharkApp {
                 language.text(Key::Current),
                 stats.current,
                 &sensor.unit,
+                self.settings.temperature_unit,
+                Some(&sensor.name),
                 p.text,
             );
             metric_chip(
@@ -639,6 +688,8 @@ impl GpuSharkApp {
                 language.text(Key::Min),
                 stats.min,
                 &sensor.unit,
+                self.settings.temperature_unit,
+                Some(&sensor.name),
                 p.muted,
             );
             metric_chip(
@@ -646,6 +697,8 @@ impl GpuSharkApp {
                 language.text(Key::Avg),
                 stats.avg,
                 &sensor.unit,
+                self.settings.temperature_unit,
+                Some(&sensor.name),
                 p.muted,
             );
             metric_chip(
@@ -653,6 +706,8 @@ impl GpuSharkApp {
                 language.text(Key::Max),
                 stats.max,
                 &sensor.unit,
+                self.settings.temperature_unit,
+                Some(&sensor.name),
                 p.graph,
             );
         });
@@ -661,6 +716,8 @@ impl GpuSharkApp {
             &self.history.row_samples(&selected_id),
             stats,
             &sensor.unit,
+            self.settings.temperature_unit,
+            Some(&sensor.name),
             p,
         );
     }
@@ -809,14 +866,23 @@ impl GpuSharkApp {
                     } else {
                         "Temperature"
                     });
-                    ui.add_enabled(
-                        false,
-                        egui::Button::new(if matches!(language, Language::Russian) {
-                            "Цельсий"
-                        } else {
-                            "Celsius"
-                        }),
-                    );
+                    egui::ComboBox::from_id_salt("temperature-unit")
+                        .selected_text(match self.settings_draft.temperature_unit {
+                            TemperatureUnit::Celsius => "°C",
+                            TemperatureUnit::Fahrenheit => "°F",
+                        })
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(
+                                &mut self.settings_draft.temperature_unit,
+                                TemperatureUnit::Celsius,
+                                "°C",
+                            );
+                            ui.selectable_value(
+                                &mut self.settings_draft.temperature_unit,
+                                TemperatureUnit::Fahrenheit,
+                                "°F",
+                            );
+                        });
                     ui.end_row();
                     ui.label(language.text(Key::TrackAllMaxima));
                     ui.checkbox(&mut self.settings_draft.track_all_maxima, "");
@@ -1441,6 +1507,45 @@ fn paint_elided(
     elided
 }
 
+fn is_celsius_unit(unit: &str) -> bool {
+    let raw = unit.trim();
+    raw.eq_ignore_ascii_case("c")
+        || raw.eq_ignore_ascii_case("celsius")
+        || (raw.contains('°') && raw.ends_with(['c', 'C']))
+}
+
+fn is_delta_reading(unit: &str, name: Option<&str>) -> bool {
+    unit.contains('Δ')
+        || name.is_some_and(|name| {
+            name.split_whitespace()
+                .any(|word| word.eq_ignore_ascii_case("delta") || word == "Δ")
+        })
+}
+
+fn display_temperature(
+    value: f32,
+    unit: &str,
+    name: Option<&str>,
+    temperature_unit: TemperatureUnit,
+) -> f32 {
+    if !is_celsius_unit(unit) {
+        return value;
+    }
+    if is_delta_reading(unit, name) {
+        temperature_unit.delta(value)
+    } else {
+        temperature_unit.temperature(value)
+    }
+}
+
+fn display_unit<'a>(unit: &'a str, temperature_unit: TemperatureUnit) -> &'a str {
+    if is_celsius_unit(unit) {
+        temperature_unit.symbol()
+    } else {
+        unit
+    }
+}
+
 fn sparkline(painter: &egui::Painter, rect: Rect, samples: &[f32], color: Color32) {
     if samples.len() < 2 {
         return;
@@ -1469,7 +1574,15 @@ fn sparkline(painter: &egui::Painter, rect: Rect, samples: &[f32], color: Color3
     painter.add(egui::Shape::line(points, Stroke::new(1.5, color)));
 }
 
-fn graph(ui: &mut egui::Ui, samples: &[f32], stats: SensorStats, unit: &str, p: Palette) {
+fn graph(
+    ui: &mut egui::Ui,
+    samples: &[f32],
+    stats: SensorStats,
+    unit: &str,
+    temperature_unit: TemperatureUnit,
+    name: Option<&str>,
+    p: Palette,
+) {
     let (rect, response) =
         ui.allocate_exact_size(Vec2::new(ui.available_width(), 128.0), Sense::hover());
     ui.painter().rect_filled(rect, 6.0, p.plot_bg);
@@ -1490,14 +1603,20 @@ fn graph(ui: &mut egui::Ui, samples: &[f32], stats: SensorStats, unit: &str, p: 
     ui.painter().text(
         plot.left_top(),
         Align2::LEFT_TOP,
-        format!("{upper:.1}"),
+        format!(
+            "{:.1}",
+            display_temperature(upper, unit, name, temperature_unit)
+        ),
         FontId::monospace(10.0),
         p.muted,
     );
     ui.painter().text(
         plot.left_bottom(),
         Align2::LEFT_BOTTOM,
-        format!("{lower:.1}"),
+        format!(
+            "{:.1}",
+            display_temperature(lower, unit, name, temperature_unit)
+        ),
         FontId::monospace(10.0),
         p.muted,
     );
@@ -1544,21 +1663,35 @@ fn graph(ui: &mut egui::Ui, samples: &[f32], stats: SensorStats, unit: &str, p: 
             }
         }
     }
+    let display_unit = display_unit(unit, temperature_unit);
     let _ = match hovered {
-        Some(value) => response.on_hover_text(format!("{value:.1} {unit}")),
+        Some(value) => response.on_hover_text(format!(
+            "{:.1} {display_unit}",
+            display_temperature(value, unit, name, temperature_unit)
+        )),
         None => response,
     };
 }
 
-fn metric_chip(ui: &mut egui::Ui, label: &str, value: f32, unit: &str, color: Color32) {
+fn metric_chip(
+    ui: &mut egui::Ui,
+    label: &str,
+    value: f32,
+    unit: &str,
+    temperature_unit: TemperatureUnit,
+    name: Option<&str>,
+    color: Color32,
+) {
     egui::Frame::new()
         .fill(Color32::TRANSPARENT)
         .stroke(Stroke::new(1.0, color.gamma_multiply(0.5)))
         .corner_radius(4.0)
         .inner_margin(egui::Margin::symmetric(10, 6))
         .show(ui, |ui| {
+            let display_value = display_temperature(value, unit, name, temperature_unit);
+            let display_unit = display_unit(unit, temperature_unit);
             ui.label(
-                RichText::new(format!("{label}  {value:.1} {unit}"))
+                RichText::new(format!("{label}  {display_value:.1} {display_unit}"))
                     .size(11.5)
                     .strong()
                     .color(color),
@@ -1566,16 +1699,23 @@ fn metric_chip(ui: &mut egui::Ui, label: &str, value: f32, unit: &str, color: Co
         });
 }
 
-fn sensor_value(sensor: &SensorReading) -> String {
+fn sensor_value(sensor: &SensorReading, temperature_unit: TemperatureUnit) -> String {
     if metadata(sensor).kind == SensorKind::PerfCap
         && sensor.name.trim().eq_ignore_ascii_case("PerfCap Reason")
     {
         return sensor.unit.clone();
     }
+    let value = display_temperature(
+        sensor.value,
+        &sensor.unit,
+        Some(&sensor.name),
+        temperature_unit,
+    );
+    let unit = display_unit(&sensor.unit, temperature_unit);
     match sensor.unit.trim().to_ascii_lowercase().as_str() {
-        "rpm" | "mhz" | "mb" => format!("{:.0} {}", sensor.value, sensor.unit),
-        "v" => format!("{:.3} {}", sensor.value, sensor.unit),
-        _ => format!("{:.1} {}", sensor.value, sensor.unit),
+        "rpm" | "mhz" | "mb" => format!("{:.0} {}", value, unit),
+        "v" => format!("{:.3} {}", value, unit),
+        _ => format!("{:.1} {}", value, unit),
     }
 }
 
@@ -1699,21 +1839,47 @@ mod tests {
     #[test]
     fn value_formatting_is_unit_aware() {
         assert_eq!(
-            sensor_value(&SensorReading {
-                name: "GPU Fan 1".into(),
-                value: 1380.0,
-                unit: "RPM".into()
-            }),
+            sensor_value(
+                &SensorReading {
+                    name: "GPU Fan 1".into(),
+                    value: 1380.0,
+                    unit: "RPM".into()
+                },
+                TemperatureUnit::Celsius
+            ),
             "1380 RPM"
         );
         assert_eq!(
-            sensor_value(&SensorReading {
-                name: "GPU Voltage".into(),
-                value: 1.05,
-                unit: "V".into()
-            }),
+            sensor_value(
+                &SensorReading {
+                    name: "GPU Voltage".into(),
+                    value: 1.05,
+                    unit: "V".into()
+                },
+                TemperatureUnit::Celsius
+            ),
             "1.050 V"
         );
+    }
+
+    #[test]
+    fn fahrenheit_formats_temperature_surfaces_without_converting_other_units() {
+        for (name, value, unit, expected) in [
+            ("GPU Core", 50.0, "°C", "122.0 °F"),
+            ("CPU Package", 60.0, "°C", "140.0 °F"),
+            ("HotSpot-to-Core Delta", 15.0, "°C", "27.0 °F"),
+            ("Temperature difference", 15.0, "Δ°C", "27.0 °F"),
+            ("GPU Voltage", 1.05, "V", "1.050 V"),
+            ("GPU Fan 1", 1380.0, "RPM", "1380 RPM"),
+            ("PerfCap Reason", 0.0, "Pwr, VRel", "Pwr, VRel"),
+        ] {
+            let sensor = SensorReading {
+                name: name.into(),
+                value,
+                unit: unit.into(),
+            };
+            assert_eq!(sensor_value(&sensor, TemperatureUnit::Fahrenheit), expected);
+        }
     }
 
     #[test]
